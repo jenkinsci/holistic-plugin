@@ -828,68 +828,12 @@ public class OverviewDataService {
         return perm != null ? perm.size() : 0;
     }
 
-    /** Loads lockable-resources via reflection so the plugin stays optional. */
     private JSONArray listLocks(long now) {
-        JSONArray arr = new JSONArray();
-        try {
-            // uberClassLoader so we can reach across plugin classloaders.
-            ClassLoader cl = Jenkins.get().getPluginManager().uberClassLoader;
-            Class<?> mgrCls = cl.loadClass("org.jenkins.plugins.lockableresources.LockableResourcesManager");
-            Object mgr = mgrCls.getMethod("get").invoke(null);
-            Object resourcesObj = mgrCls.getMethod("getResources").invoke(mgr);
-            if (!(resourcesObj instanceof List)) {
-                LOGGER.warning("LockableResourcesManager.getResources() did not return a List: "
-                        + (resourcesObj == null ? "null" : resourcesObj.getClass().getName()));
-                return arr;
-            }
-            List<?> resources = (List<?>) resourcesObj;
-
-            for (Object r : resources) {
-                JSONObject l = new JSONObject();
-                String name = (String) r.getClass().getMethod("getName").invoke(r);
-                boolean locked;
-                try {
-                    locked = (Boolean) r.getClass().getMethod("isLocked").invoke(r);
-                } catch (NoSuchMethodException nsme) {
-                    Object holder = r.getClass().getMethod("getBuild").invoke(r);
-                    locked = (holder != null);
-                }
-                boolean reserved = false;
-                try {
-                    Object res = r.getClass().getMethod("isReserved").invoke(r);
-                    if (res instanceof Boolean) reserved = (Boolean) res;
-                } catch (NoSuchMethodException ignored) {}
-
-                l.put("name", name);
-                if (locked) {
-                    long holdMs = 0;
-                    try {
-                        Object build = r.getClass().getMethod("getBuild").invoke(r);
-                        if (build != null) {
-                            long startTime = (Long) build.getClass().getMethod("getStartTimeInMillis").invoke(build);
-                            holdMs = now - startTime;
-                        }
-                    } catch (Exception ignored) {}
-                    l.put("status", "held");
-                    l.put("holdMs", holdMs);
-                    l.put("stale", holdMs > LOCK_WARN_MS);
-                } else if (reserved) {
-                    l.put("status", "reserved");
-                    l.put("holdMs", 0L);
-                    l.put("stale", false);
-                } else {
-                    l.put("status", "free");
-                    l.put("holdMs", 0L);
-                    l.put("stale", false);
-                }
-                arr.add(l);
-            }
-        } catch (ClassNotFoundException e) {
+        if (Jenkins.get().getPlugin("lockable-resources") == null) {
             LOGGER.fine("lockable-resources plugin not installed — skipping locks panel");
-        } catch (Throwable t) {
-            LOGGER.log(Level.WARNING, "Failed to read lockable resources via reflection", t);
+            return new JSONArray();
         }
-        return arr;
+        return LockableResourcesAdapter.listLocks(now, LOCK_WARN_MS);
     }
 
     private static String buildAbsoluteUrl(WorkflowJob job, int buildNumber) {

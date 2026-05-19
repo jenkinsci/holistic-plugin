@@ -78,6 +78,12 @@
             <groupId>io.jenkins.plugins</groupId>
             <artifactId>ionicons-api</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.6wind.jenkins</groupId>
+            <artifactId>lockable-resources</artifactId>
+            <version>1515.v380548282a_59</version>
+            <optional>true</optional>
+        </dependency>
     </dependencies>
 
     <repositories>
