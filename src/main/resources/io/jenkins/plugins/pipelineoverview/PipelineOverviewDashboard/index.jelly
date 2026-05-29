@@ -19,15 +19,10 @@
 
             <div id="overview-dashboard"
                  data-view-url="${rootURL}/${it.url}"
-                 data-root-url="${rootURL}"
                  data-refresh-interval="${it.refreshIntervalSeconds}"
-                 data-dashboard-title="${it.dashboardTitle}"
-                 data-header-message="${it.headerMessage}"
-                 data-crumb-field="${h.getCrumbRequestField()}"
-                 data-crumb-value="${h.getCrumb(request)}">
+                 data-dashboard-title="${it.dashboardTitle}">
                 <div class="od-loading">
-                    <l:spinner />
-                    <p>Loading dashboard data&#8230;</p>
+                    <l:spinner text="Loading dashboard data" />
                 </div>
             </div>
 

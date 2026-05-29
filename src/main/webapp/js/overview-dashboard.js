@@ -9,7 +9,7 @@
   const title      = root.dataset.dashboardTitle || 'PIPELINE OVERVIEW';
   const kiosk      = new URLSearchParams(window.location.search).has('kiosk');
   const fullscreen = root.dataset.fullscreen === 'true';
-  const rawRootUrl = root.dataset.rootUrl || '';
+  const rawRootUrl = (document.head && document.head.dataset.rooturl) || '';
   const rootUrl    = rawRootUrl.endsWith('/') ? rawRootUrl : rawRootUrl + '/';
 
   if (kiosk || fullscreen) document.body.classList.add('od-kiosk');

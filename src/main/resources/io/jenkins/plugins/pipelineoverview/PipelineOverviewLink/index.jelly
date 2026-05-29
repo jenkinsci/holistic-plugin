@@ -9,7 +9,6 @@
 
             <div id="overview-dashboard"
                  data-view-url="${rootURL}/pipeline-overview/"
-                 data-root-url="${rootURL}"
                  data-refresh-interval="${it.view.refreshIntervalSeconds}"
                  data-dashboard-title="${it.view.dashboardTitle}"
                  data-fullscreen="true">
