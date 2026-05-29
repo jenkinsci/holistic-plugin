@@ -9,9 +9,8 @@
   const title      = root.dataset.dashboardTitle || 'PIPELINE OVERVIEW';
   const kiosk      = new URLSearchParams(window.location.search).has('kiosk');
   const fullscreen = root.dataset.fullscreen === 'true';
-  const rootUrl    = root.dataset.rootUrl || '/';
-  const crumbField = root.dataset.crumbField || '';
-  const crumbValue = root.dataset.crumbValue || '';
+  const rawRootUrl = root.dataset.rootUrl || '';
+  const rootUrl    = rawRootUrl.endsWith('/') ? rawRootUrl : rawRootUrl + '/';
 
   if (kiosk || fullscreen) document.body.classList.add('od-kiosk');
 
@@ -165,7 +164,7 @@
         + '</svg><span>Jenkins</span></a>'
       : '';
 
-    const kioskToggleHtml = '<a class="od-kiosk-toggle" href="' +
+    const kioskToggleHtml = fullscreen ? '' : '<a class="od-kiosk-toggle" href="' +
       escapeHtml(kioskToggleUrl()) + '" title="' +
       (kiosk ? 'Exit kiosk mode' : 'Enter kiosk mode') + '">' +
       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -561,10 +560,6 @@
       .replace(/^Declarative:\s+/i, '')
       .replace(/^Stage:\s+/i, '');
   }
-  function shortBranchName(name) {
-    if (!name) return '';
-    return String(name).replace(/^Deploy to\s+/i, '');
-  }
   function truncateStr(s, n) {
     if (!s) return '';
     return s.length <= n ? s : s.substring(0, n - 1) + '…';
@@ -583,41 +578,57 @@
   }
 
   function renderPipelineGraph(stages) {
-    const COL_W = 90;
-    const ROW_H = 22;
-    const CIRCLE_R = 6.5;
-    const TOP_PAD = 14;
-    const BOTTOM_PAD = 14;
+    const NODE_R = 7.5;
+    const ROW_H = 26;
+    const SUB_GAP = 28;
+    const COL_GAP = 34;
+    const TOP_PAD = 16;
+    const BOTTOM_PAD = 16;
     const PADDING_X = 10;
     const LABEL_FS = 9;
     const LABEL_GAP = 5;
-    const MAX_LABEL_CHARS = 14;
+    const MAX_LABEL_CHARS = 12;
 
-    const cols = stages.map(s => ({
-      type: s.type === 'parallel' ? 'par' : 'seq',
-      items: s.type === 'parallel' ? (s.children || []) : [s],
-    }));
-
-    const maxBranches = Math.max(1, Math.max.apply(null, cols.map(c => c.items.length || 1)));
-    const innerH = maxBranches * ROW_H;
-    const totalHeight = TOP_PAD + innerH + BOTTOM_PAD;
-    const totalWidth = PADDING_X * 2 + cols.length * COL_W;
-    const centerY = TOP_PAD + innerH / 2;
-
-    const positions = cols.map((col, i) => {
-      const cx = PADDING_X + i * COL_W + COL_W / 2;
-      const ys = [];
-      if (col.type === 'seq') {
-        ys.push(centerY);
-      } else {
-        const bn = col.items.length;
-        const startY = TOP_PAD + (maxBranches - bn) * ROW_H / 2 + ROW_H / 2;
-        for (let j = 0; j < bn; j++) ys.push(startY + j * ROW_H);
+    // Normalize every column to { type, branches: [ {nodes: [{name,status}]} ] }.
+    // A seq stage is one branch with one node; a parallel branch keeps its inner sequence.
+    const cols = stages.map(s => {
+      if (s.type === 'parallel') {
+        const branches = (s.children || []).map(b => ({
+          nodes: (b.stages && b.stages.length) ? b.stages : [{ name: b.name, status: b.status }],
+        }));
+        return { type: 'par', branches };
       }
-      return { cx, ys, col };
+      return { type: 'seq', branches: [{ nodes: [s] }] };
     });
 
-    // No min-width on SVG: let the parent clip/scroll, keeping exec-time anchored right.
+    const branchCount = c => Math.max(1, c.branches.length);
+    const colSpan = c => Math.max(1, ...c.branches.map(b => b.nodes.length));
+
+    let x = PADDING_X;
+    cols.forEach(c => { c.x = x; x += colSpan(c) * SUB_GAP + COL_GAP; });
+    const totalWidth = x - COL_GAP + PADDING_X;
+
+    const maxBranches = Math.max(1, ...cols.map(branchCount));
+    const innerH = maxBranches * ROW_H;
+    const totalHeight = TOP_PAD + innerH + BOTTOM_PAD;
+    const centerY = TOP_PAD + innerH / 2;
+
+    const nodeX = (c, k) => c.x + k * SUB_GAP + SUB_GAP / 2;
+
+    // Resolve each column into placed branch rows with absolute node coordinates.
+    const placed = cols.map(c => {
+      const bn = c.branches.length;
+      const startY = bn <= 1 ? centerY : TOP_PAD + (maxBranches - bn) * ROW_H / 2 + ROW_H / 2;
+      const branches = c.branches.map((b, bi) => {
+        const y = bn <= 1 ? centerY : startY + bi * ROW_H;
+        const nodes = b.nodes.map((s, k) => ({
+          x: nodeX(c, k), y, status: (s.status || 'ok').toLowerCase(), name: s.name || '',
+        }));
+        return { y, nodes };
+      });
+      return { type: c.type, branches };
+    });
+
     let svg = '<svg viewBox="0 0 ' + totalWidth + ' ' + totalHeight +
       '" preserveAspectRatio="xMinYMid meet" class="pg-svg" ' +
       'style="height:' + totalHeight + 'px; width:' + totalWidth + 'px; max-width:none">';
@@ -632,53 +643,61 @@
         ', ' + x2.toFixed(1) + ' ' + y2 + '" class="pg-line' + cls + '"/>';
     }
 
-    // Connectors
-    for (let i = 1; i < cols.length; i++) {
-      const prev = positions[i - 1];
-      const curr = positions[i];
-      const prevAllSkipped = prev.col.items.every(s => (s.status || 'ok') === 'skipped');
-      const currAllSkipped = curr.col.items.every(s => (s.status || 'ok') === 'skipped');
-      const cls = (prevAllSkipped && currAllSkipped) ? ' skipped' : '';
+    const allSkipped = br => br.nodes.every(n => n.status === 'skipped');
 
-      if (prev.ys.length === 1 && curr.ys.length === 1) {
-        svg += drawLine(prev.cx + CIRCLE_R, prev.ys[0], curr.cx - CIRCLE_R, curr.ys[0], cls);
-      } else if (prev.ys.length === 1) {
-        curr.ys.forEach(cy => { svg += drawLine(prev.cx + CIRCLE_R, prev.ys[0], curr.cx - CIRCLE_R, cy, cls); });
-      } else if (curr.ys.length === 1) {
-        prev.ys.forEach(py => { svg += drawLine(prev.cx + CIRCLE_R, py, curr.cx - CIRCLE_R, curr.ys[0], cls); });
+    // Lines between consecutive nodes within a branch.
+    placed.forEach(p => p.branches.forEach(br => {
+      const cls = allSkipped(br) ? ' skipped' : '';
+      for (let k = 1; k < br.nodes.length; k++) {
+        svg += drawLine(br.nodes[k - 1].x + NODE_R, br.nodes[k - 1].y, br.nodes[k].x - NODE_R, br.nodes[k].y, cls);
+      }
+    }));
+
+    // Connectors between columns: last node of each prev branch -> first node of each curr branch.
+    for (let i = 1; i < placed.length; i++) {
+      const exits = placed[i - 1].branches.map(br => ({ x: br.nodes[br.nodes.length - 1].x, y: br.y, skipped: allSkipped(br) }));
+      const entries = placed[i].branches.map(br => ({ x: br.nodes[0].x, y: br.y, skipped: allSkipped(br) }));
+      const link = (a, b) => drawLine(a.x + NODE_R, a.y, b.x - NODE_R, b.y, (a.skipped && b.skipped) ? ' skipped' : '');
+      if (exits.length === 1 && entries.length === 1) {
+        svg += link(exits[0], entries[0]);
+      } else if (exits.length === 1) {
+        entries.forEach(e => { svg += link(exits[0], e); });
+      } else if (entries.length === 1) {
+        exits.forEach(e => { svg += link(e, entries[0]); });
       } else {
-        const n = Math.min(prev.ys.length, curr.ys.length);
-        for (let j = 0; j < n; j++) {
-          svg += drawLine(prev.cx + CIRCLE_R, prev.ys[j], curr.cx - CIRCLE_R, curr.ys[j], cls);
-        }
+        const n = Math.min(exits.length, entries.length);
+        for (let j = 0; j < n; j++) svg += link(exits[j], entries[j]);
       }
     }
 
-    // Nodes + labels
-    cols.forEach((col, i) => {
-      const pos = positions[i];
-      col.items.forEach((stage, j) => {
-        const cy = pos.ys[j];
-        const status = (stage.status || 'ok').toLowerCase();
-        const fullName = stage.name || '';
-        const labelText = (col.type === 'par' ? shortBranchName(fullName) : shortStageName(fullName));
+    // Nodes + glyphs + labels.
+    placed.forEach(p => p.branches.forEach(br => br.nodes.forEach(n => {
+      svg += '<circle cx="' + n.x + '" cy="' + n.y + '" r="' + NODE_R +
+        '" class="pg-node pg-' + n.status + '" data-tip="<strong>' + escapeHtml(n.name) +
+        '</strong><span class=\'tt-label\'>' + n.status.toUpperCase() + '</span>"/>' +
+        statusGlyph(n.x, n.y, n.status);
 
-        svg += '<circle cx="' + pos.cx + '" cy="' + cy + '" r="' + CIRCLE_R +
-          '" class="pg-node pg-' + status + '" data-tip="<strong>' + escapeHtml(fullName) +
-          '</strong><span class=\'tt-label\'>' + status.toUpperCase() + '</span>"/>';
-
-        const labelY = (col.type === 'seq')
-          ? cy - CIRCLE_R - LABEL_GAP
-          : cy + CIRCLE_R + LABEL_GAP + LABEL_FS - 2;
-
-        svg += '<text x="' + pos.cx + '" y="' + labelY + '" text-anchor="middle" class="pg-label ' +
-          status + '" font-size="' + LABEL_FS + '">' +
-          escapeHtml(truncateStr(labelText, MAX_LABEL_CHARS)) + '</text>';
-      });
-    });
+      const labelY = p.type === 'seq' ? n.y - NODE_R - LABEL_GAP : n.y + NODE_R + LABEL_GAP + LABEL_FS - 2;
+      svg += '<text x="' + n.x + '" y="' + labelY + '" text-anchor="middle" class="pg-label ' +
+        n.status + '" font-size="' + LABEL_FS + '">' +
+        escapeHtml(truncateStr(shortStageName(n.name), MAX_LABEL_CHARS)) + '</text>';
+    })));
 
     svg += '</svg>';
     return svg;
+  }
+
+  function statusGlyph(cx, cy, status) {
+    if (status === 'ok') {
+      return '<path d="M ' + (cx - 3) + ' ' + cy + ' l 2 2.4 l 4 -4.8" class="pg-glyph"/>';
+    }
+    if (status === 'fail') {
+      return '<path d="M ' + (cx - 2.6) + ' ' + (cy - 2.6) + ' l 5.2 5.2 M ' + (cx + 2.6) + ' ' + (cy - 2.6) + ' l -5.2 5.2" class="pg-glyph"/>';
+    }
+    if (status === 'unstable') {
+      return '<path d="M ' + cx + ' ' + (cy - 3.2) + ' l 0 3.4 M ' + cx + ' ' + (cy + 2.8) + ' l 0 0.4" class="pg-glyph"/>';
+    }
+    return '';
   }
 
   /* stage tooltip */
@@ -954,8 +973,7 @@
   function renderAgentsPanel(agents) {
     const perm = agents.permanent || [];
     const clouds = agents.clouds || [];
-    const allOk = perm.every(a => a.status === 'ok') &&
-                  clouds.every(c => (c.hot || 0) > 0 || (c.max || 0) === 0);
+    const allOk = perm.every(a => a.status === 'ok');
 
     const permHtml = perm.map(a => {
       const cls = a.status === 'down' ? 'down' : (a.status === 'partial' ? 'partial' : 'ok');
@@ -966,11 +984,9 @@
     }).join('');
 
     const cloudsHtml = clouds.map(c => {
-      const w = (c.max || 0) > 0 ? Math.round((c.hot || 0) * 100 / c.max) : 0;
       return '<div class="agent-cloud">' +
+        svgIcon('server') +
         '<span class="cloud-name">' + escapeHtml(c.name) + '</span>' +
-        '<div class="cloud-bar"><div class="cloud-bar-fill" style="width:' + w + '%"></div></div>' +
-        '<span class="cloud-meta">' + (c.hot || 0) + '/' + (c.max || 0) + ' hot</span>' +
       '</div>';
     }).join('');
 
@@ -1015,34 +1031,19 @@
   /* fetch loop */
 
   function fetchData() {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', dataUrl, true);
-    xhr.setRequestHeader('Accept', 'application/json');
-    if (crumbField && crumbValue) {
-      xhr.setRequestHeader(crumbField, crumbValue);
-    } else if (typeof crumb !== 'undefined' && crumb && crumb.fieldName) {
-      xhr.setRequestHeader(crumb.fieldName, crumb.value);
-    }
-    xhr.timeout = 30000;
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const data = JSON.parse(xhr.responseText);
-          if (data.error) {
-            renderError(data.error);
-          } else {
-            renderAll(data);
-          }
-        } catch (e) {
-          renderError('parse error: ' + e.message);
-        }
-      } else {
-        renderError('HTTP ' + xhr.status);
-      }
-    };
-    xhr.onerror = () => renderError('network error');
-    xhr.ontimeout = () => renderError('request timed out');
-    xhr.send();
+    fetch(dataUrl, {
+      method: 'POST',
+      headers: crumb.wrap({ Accept: 'application/json' }),
+    })
+      .then(resp => {
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.json();
+      })
+      .then(data => {
+        if (data.error) renderError(data.error);
+        else renderAll(data);
+      })
+      .catch(e => renderError(e.message));
   }
 
   /* boot */

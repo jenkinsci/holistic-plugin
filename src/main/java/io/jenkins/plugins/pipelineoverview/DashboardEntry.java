@@ -22,18 +22,15 @@ public class DashboardEntry extends AbstractDescribableImpl<DashboardEntry> impl
     private static final long serialVersionUID = 1L;
 
     private String jobName;
-    private String displayName;
     private boolean enabled;
 
     @DataBoundConstructor
     public DashboardEntry(String jobName) {
         this.jobName = jobName != null ? jobName.trim() : "";
-        this.displayName = "";
         this.enabled = true;
     }
 
     public String getJobName()    { return jobName; }
-    public String getDisplayName(){ return displayName; }
     public boolean isEnabled()    { return enabled; }
 
     public void setJobName(String jobName) {
@@ -41,17 +38,8 @@ public class DashboardEntry extends AbstractDescribableImpl<DashboardEntry> impl
     }
 
     @DataBoundSetter
-    public void setDisplayName(String displayName) {
-        this.displayName = displayName != null ? displayName.trim() : "";
-    }
-
-    @DataBoundSetter
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
-    }
-
-    public String getEffectiveDisplayName() {
-        return (displayName != null && !displayName.isEmpty()) ? displayName : jobName;
     }
 
     @Extension

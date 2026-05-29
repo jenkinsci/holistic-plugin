@@ -3,10 +3,6 @@
     <f:entry title="Job Name" field="jobName">
         <f:textbox autoCompleteDelimChar="" />
     </f:entry>
-    <f:entry title="Display Name" field="displayName"
-             description="Optional friendly name (defaults to job name).">
-        <f:textbox />
-    </f:entry>
     <f:entry title="Enabled" field="enabled">
         <f:checkbox default="true" />
     </f:entry>

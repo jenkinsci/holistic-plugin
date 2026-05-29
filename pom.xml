@@ -54,7 +54,7 @@
             <dependency>
                 <groupId>io.jenkins.tools.bom</groupId>
                 <artifactId>bom-${jenkins.baseline}.x</artifactId>
-                <version>6364.v16b_76a_4023c7</version>
+                <version>6453.v115ff6f496dd</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -79,9 +79,12 @@
             <artifactId>ionicons-api</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.jenkins.plugins</groupId>
+            <artifactId>caffeine-api</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.6wind.jenkins</groupId>
             <artifactId>lockable-resources</artifactId>
-            <version>1515.v380548282a_59</version>
             <optional>true</optional>
         </dependency>
     </dependencies>

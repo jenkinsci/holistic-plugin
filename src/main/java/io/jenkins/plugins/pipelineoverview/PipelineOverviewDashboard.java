@@ -120,12 +120,16 @@ public class PipelineOverviewDashboard extends View {
     @DataBoundSetter
     public void setAutoDiscover(boolean v) {
         this.autoDiscover = v;
-        this.autoCache = null;
+        invalidateAutoCache();
     }
 
     @DataBoundSetter
     public void setAutoExcludeFolders(List<String> v) {
         this.autoExcludeFolders = v != null ? new ArrayList<>(v) : new ArrayList<>();
+        invalidateAutoCache();
+    }
+
+    private synchronized void invalidateAutoCache() {
         this.autoCache = null;
     }
 
@@ -232,7 +236,7 @@ public class PipelineOverviewDashboard extends View {
         this.headerMessage = json.optString("headerMessage", "");
         this.dashboardTitle = json.optString("dashboardTitle", "");
         this.autoDiscover = json.optBoolean("autoDiscover", false);
-        this.autoCache = null;
+        invalidateAutoCache();
 
         Object groupsData = json.opt("groups");
         if (groupsData != null) {

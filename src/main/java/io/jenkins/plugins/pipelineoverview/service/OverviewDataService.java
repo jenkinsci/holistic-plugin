@@ -1,12 +1,15 @@
 package io.jenkins.plugins.pipelineoverview.service;
 
 import com.cloudbees.workflow.flownode.FlowNodeUtil;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.cloudbees.workflow.rest.external.RunExt;
 import com.cloudbees.workflow.rest.external.StageNodeExt;
 import com.cloudbees.workflow.rest.external.StatusExt;
 import hudson.model.Computer;
 import hudson.model.Item;
 import hudson.model.Queue;
+import hudson.model.Result;
 import hudson.slaves.Cloud;
 import io.jenkins.plugins.pipelineoverview.DashboardEntry;
 import io.jenkins.plugins.pipelineoverview.DashboardGroup;
@@ -34,7 +37,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -53,9 +56,13 @@ public class OverviewDataService {
     private static final long REGRESSION_MIN_GREEN_MS = 6 * 60 * 60 * 1000L;
     private static final long LOCK_WARN_MS = 15 * 60 * 1000L;
 
-    private static final Map<String, CachedBuilds> BUILD_CACHE = new ConcurrentHashMap<>();
-    private static final long BUILD_CACHE_TTL_MS = 15_000;
-    private static final Map<String, JSONArray> STAGE_TOPO_CACHE = new ConcurrentHashMap<>();
+    private static final Cache<String, List<BuildRecord>> BUILD_CACHE = Caffeine.newBuilder()
+            .expireAfterWrite(15, TimeUnit.SECONDS)
+            .maximumSize(1000)
+            .build();
+    private static final Cache<String, JSONArray> STAGE_TOPO_CACHE = Caffeine.newBuilder()
+            .maximumSize(500)
+            .build();
     private static final Deque<Integer> QUEUE_HISTORY = new ArrayDeque<>(QUEUE_HISTORY_LEN);
 
     public JSONObject fetchDashboardData(List<DashboardGroup> groups, int historyDays) {
@@ -63,11 +70,9 @@ public class OverviewDataService {
         Jenkins jenkins = Jenkins.get();
 
         Map<String, PipelineSnapshot> snaps = new LinkedHashMap<>();
-        Map<String, String> jobToGroup = new LinkedHashMap<>();
         for (DashboardGroup group : groups) {
             for (DashboardEntry entry : group.getPipelines()) {
                 if (!entry.isEnabled()) continue;
-                jobToGroup.put(entry.getJobName(), group.getName());
                 try {
                     PipelineSnapshot snap = collectPipelineSnapshot(jenkins, entry, group.getName(), now, historyDays);
                     if (snap != null) snaps.put(entry.getJobName(), snap);
@@ -90,13 +95,13 @@ public class OverviewDataService {
 
         for (PipelineSnapshot p : snaps.values()) {
             for (BuildRecord r : p.records) {
-                if (r.building) continue;
-                if (r.startTimeMs >= sevenDaysAgo) {
+                if (r.building()) continue;
+                if (r.startTimeMs() >= sevenDaysAgo) {
                     totalThisWeek++;
-                    if ("SUCCESS".equals(r.result)) successThisWeek++;
-                } else if (r.startTimeMs >= fourteenDaysAgo) {
+                    if ("SUCCESS".equals(r.result())) successThisWeek++;
+                } else if (r.startTimeMs() >= fourteenDaysAgo) {
                     totalLastWeek++;
-                    if ("SUCCESS".equals(r.result)) successLastWeek++;
+                    if ("SUCCESS".equals(r.result())) successLastWeek++;
                 }
             }
             if ("FAILURE".equals(p.lastResult)) {
@@ -242,7 +247,6 @@ public class OverviewDataService {
 
         result.put("agents", agentsJson);
 
-        evictStaleCache();
         return result;
     }
 
@@ -259,20 +263,19 @@ public class OverviewDataService {
 
         PipelineSnapshot snap = new PipelineSnapshot();
         snap.jobName = entry.getJobName();
-        snap.displayName = entry.getEffectiveDisplayName();
+        snap.displayName = job.getFullDisplayName();
         snap.groupName = groupName;
         snap.records = records;
 
         if (records.isEmpty()) return snap;
 
         BuildRecord latest = records.get(0);
-        snap.lastBuildNumber = latest.number;
-        snap.lastBuildUrl = buildAbsoluteUrl(job, latest.number);
-        snap.lastBuildTimeMs = latest.startTimeMs;
-        snap.building = latest.building;
-        snap.lastResult = latest.building ? "BUILDING" : (latest.result != null ? latest.result : "UNKNOWN");
+        snap.lastBuildNumber = latest.number();
+        snap.lastBuildUrl = buildAbsoluteUrl(job, latest.number());
+        snap.building = latest.building();
+        snap.lastResult = latest.building() ? "BUILDING" : (latest.result() != null ? latest.result() : "UNKNOWN");
 
-        snap.stagesTopology = getStageTopology(job, latest.number);
+        snap.stagesTopology = getStageTopology(job, latest.number());
 
         // junit/jacoco set build UNSTABLE/FAILURE without marking any stage; propagate
         // to the last non-skipped stage so the visual matches the build-result dot.
@@ -283,11 +286,11 @@ public class OverviewDataService {
 
         long sevenAgo = now - WEEK_MS;
         for (BuildRecord r : records) {
-            if (r.building) continue;
-            if (r.startTimeMs >= sevenAgo) {
+            if (r.building()) continue;
+            if (r.startTimeMs() >= sevenAgo) {
                 snap.totalBuilds7d++;
-                if ("UNSTABLE".equals(r.result)) snap.unstableCount7d++;
-                else if ("FAILURE".equals(r.result)) snap.failureCount7d++;
+                if ("UNSTABLE".equals(r.result())) snap.unstableCount7d++;
+                else if ("FAILURE".equals(r.result())) snap.failureCount7d++;
             }
         }
 
@@ -296,17 +299,17 @@ public class OverviewDataService {
 
         if ("FAILURE".equals(snap.lastResult) || "UNSTABLE".equals(snap.lastResult)) {
             int consecutive = 0;
-            long brokeAt = latest.startTimeMs;
+            long brokeAt = latest.startTimeMs();
             int lastGreenBuild = 0;
             long lastGreenTime = 0;
             for (BuildRecord r : records) {
-                if (r.building) continue;
-                if ("FAILURE".equals(r.result) || "UNSTABLE".equals(r.result)) {
+                if (r.building()) continue;
+                if ("FAILURE".equals(r.result()) || "UNSTABLE".equals(r.result())) {
                     consecutive++;
-                    brokeAt = r.startTimeMs;
-                } else if ("SUCCESS".equals(r.result)) {
-                    lastGreenBuild = r.number;
-                    lastGreenTime = r.startTimeMs;
+                    brokeAt = r.startTimeMs();
+                } else if ("SUCCESS".equals(r.result())) {
+                    lastGreenBuild = r.number();
+                    lastGreenTime = r.startTimeMs();
                     break;
                 }
             }
@@ -334,7 +337,7 @@ public class OverviewDataService {
         // Cache is build-number keyed; trust it only for finished builds whose cached
         // topology has no leftover "building" stages (those would be stale snapshots
         // from a prior poll that ran while the build was still in flight).
-        JSONArray cached = STAGE_TOPO_CACHE.get(key);
+        JSONArray cached = STAGE_TOPO_CACHE.getIfPresent(key);
         if (cached != null && !stillBuilding && !containsBuildingStatus(cached)) {
             return cached;
         }
@@ -391,66 +394,68 @@ public class OverviewDataService {
             }
 
             // Two-pass build — net.sf.json's getJSONArray()-then-mutate doesn't reliably persist.
-            Map<String, List<JSONObject>> childrenByParent = new LinkedHashMap<>();
             Map<Integer, String> parallelSlotIds = new LinkedHashMap<>();
+            Map<String, LinkedHashMap<String, BranchAccum>> parallelBranches = new LinkedHashMap<>();
 
             for (FlowNode n : stageNodes) {
-                String stageName = labelOf(n);
                 StatusExt nodeLevel = stageStatuses.get(n.getId());
                 StatusExt fromRunExt = knownStatuses.get(n.getId());
-                StatusExt agg;
-                if (fromRunExt == StatusExt.IN_PROGRESS
+                boolean running = fromRunExt == StatusExt.IN_PROGRESS
                         || fromRunExt == StatusExt.PAUSED_PENDING_INPUT
                         || nodeLevel == StatusExt.IN_PROGRESS
-                        || nodeLevel == StatusExt.PAUSED_PENDING_INPUT) {
-                    // Stage is currently running — show that, regardless of any
-                    // partial inner-step success.
-                    agg = nodeLevel != null && nodeLevel == StatusExt.PAUSED_PENDING_INPUT
-                            ? nodeLevel
-                            : (fromRunExt != null ? fromRunExt : nodeLevel);
-                } else if (nodeLevel != null) {
-                    // Stage actually ran — its inner FlowNodes carry the truth.
-                    agg = nodeLevel;
+                        || nodeLevel == StatusExt.PAUSED_PENDING_INPUT;
+                StatusExt agg;
+                if (running) {
+                    // Currently running — show that, regardless of any partial inner success.
+                    agg = (nodeLevel == StatusExt.PAUSED_PENDING_INPUT
+                            || fromRunExt == StatusExt.PAUSED_PENDING_INPUT)
+                            ? StatusExt.PAUSED_PENDING_INPUT : StatusExt.IN_PROGRESS;
                 } else if (fromRunExt != null) {
-                    // RunExt assigned a terminal status to a stage that never executed
-                    // (the build's overall result gets propagated down). Treat as skipped.
-                    agg = StatusExt.NOT_EXECUTED;
+                    // RunExt is authoritative for whether a stage ran and its terminal result
+                    // (a skipped declarative stage reports SUCCESS at the graph level but
+                    // NOT_EXECUTED here). Let the graph only escalate to a worse status, e.g.
+                    // tests flipping a SUCCESS stage to UNSTABLE.
+                    agg = (nodeLevel != null && statusRank(nodeLevel) > statusRank(fromRunExt))
+                            ? nodeLevel : fromRunExt;
+                } else if (nodeLevel != null) {
+                    agg = nodeLevel;
                 } else {
-                    agg = StatusExt.SUCCESS;
+                    agg = StatusExt.NOT_EXECUTED;
                 }
                 String status = mapStageStatus(agg);
                 String parallelParentId = parallelParentIdOf(n);
 
                 if (parallelParentId != null) {
-                    JSONObject branch = new JSONObject();
-                    branch.put("name", stageName);
-                    branch.put("status", status);
-
-                    List<JSONObject> children = childrenByParent.get(parallelParentId);
-                    if (children == null) {
-                        children = new ArrayList<>();
-                        childrenByParent.put(parallelParentId, children);
+                    BlockStartNode wrapper = branchStartOf(n);
+                    String branchId = wrapper != null ? wrapper.getId() : "branch:" + n.getId();
+                    LinkedHashMap<String, BranchAccum> branches = parallelBranches.get(parallelParentId);
+                    if (branches == null) {
+                        branches = new LinkedHashMap<>();
+                        parallelBranches.put(parallelParentId, branches);
                         JSONObject placeholder = new JSONObject();
                         placeholder.put("type", "parallel");
                         parallelSlotIds.put(topology.size(), parallelParentId);
                         topology.add(placeholder);
                     }
-                    children.add(branch);
+                    BranchAccum acc = branches.computeIfAbsent(branchId, k -> new BranchAccum(wrapper));
+                    acc.add(n, status);
                 } else {
                     JSONObject cell = new JSONObject();
                     cell.put("type", "seq");
-                    cell.put("name", stageName);
+                    cell.put("name", labelOf(n));
                     cell.put("status", status);
                     topology.add(cell);
                 }
             }
 
             for (Map.Entry<Integer, String> e : parallelSlotIds.entrySet()) {
-                List<JSONObject> children = childrenByParent.get(e.getValue());
-                JSONArray arr = new JSONArray();
-                if (children != null) arr.addAll(children);
+                LinkedHashMap<String, BranchAccum> branches = parallelBranches.get(e.getValue());
+                JSONArray childArr = new JSONArray();
+                if (branches != null) {
+                    for (BranchAccum acc : branches.values()) childArr.add(acc.toJson());
+                }
                 JSONObject placeholder = topology.getJSONObject(e.getKey());
-                placeholder.put("children", arr);
+                placeholder.put("children", childArr);
             }
 
         } catch (Throwable t) {
@@ -474,7 +479,14 @@ public class OverviewDataService {
             JSONArray children = node.optJSONArray("children");
             if (children != null) {
                 for (int j = 0; j < children.size(); j++) {
-                    if ("building".equals(children.getJSONObject(j).optString("status"))) return true;
+                    JSONObject c = children.getJSONObject(j);
+                    if ("building".equals(c.optString("status"))) return true;
+                    JSONArray stages = c.optJSONArray("stages");
+                    if (stages != null) {
+                        for (int k = 0; k < stages.size(); k++) {
+                            if ("building".equals(stages.getJSONObject(k).optString("status"))) return true;
+                        }
+                    }
                 }
             }
         }
@@ -491,6 +503,13 @@ public class OverviewDataService {
                 for (int j = 0; j < children.size(); j++) {
                     JSONObject c = children.getJSONObject(j);
                     if ("building".equals(c.optString("status"))) c.put("status", "skipped");
+                    JSONArray stages = c.optJSONArray("stages");
+                    if (stages != null) {
+                        for (int k = 0; k < stages.size(); k++) {
+                            JSONObject st = stages.getJSONObject(k);
+                            if ("building".equals(st.optString("status"))) st.put("status", "skipped");
+                        }
+                    }
                 }
             }
         }
@@ -566,6 +585,26 @@ public class OverviewDataService {
         return statusRank(a) >= statusRank(b) ? a : b;
     }
 
+    private static int statusRankStr(String s) {
+        if (s == null) return 0;
+        switch (s) {
+            case "fail": return 5;
+            case "unstable": return 4;
+            case "building": return 3;
+            case "ok": return 2;
+            case "skipped": return 1;
+            default: return 0;
+        }
+    }
+
+    /** Nearest enclosing parallel-branch wrapper (carries a ThreadNameAction), or null. */
+    private BlockStartNode branchStartOf(FlowNode n) {
+        for (BlockStartNode b : n.getEnclosingBlocks()) {
+            if (b.getAction(ThreadNameAction.class) != null) return b;
+        }
+        return null;
+    }
+
     /**
      * Returns the id of the parallel block enclosing this stage node, or null if the
      * stage is not inside a parallel branch.  The branch wrapper carries a
@@ -574,13 +613,12 @@ public class OverviewDataService {
     private String parallelParentIdOf(FlowNode n) {
         if (n.getAction(ThreadNameAction.class) != null) {
             List<? extends BlockStartNode> enc = n.getEnclosingBlocks();
-            if (enc != null && !enc.isEmpty()) return enc.get(0).getId();
+            if (!enc.isEmpty()) return enc.get(0).getId();
             return "parallel:" + n.getId();
         }
         // Declarative `parallel { stage(...) }` puts ThreadNameAction on the wrapper,
         // so the inner stage finds it one level out.
         List<? extends BlockStartNode> enc = n.getEnclosingBlocks();
-        if (enc == null) return null;
         for (int idx = 0; idx < enc.size(); idx++) {
             BlockStartNode b = enc.get(idx);
             if (b.getAction(ThreadNameAction.class) != null) {
@@ -663,33 +701,34 @@ public class OverviewDataService {
 
     private List<BuildRecord> fetchBuildRecords(WorkflowJob job, long now, int historyDays) {
         String cacheKey = job.getFullName();
-        CachedBuilds cached = BUILD_CACHE.get(cacheKey);
-        if (cached != null && !cached.isExpired()) return cached.records;
+        List<BuildRecord> cached = BUILD_CACHE.getIfPresent(cacheKey);
+        if (cached != null) return cached;
 
         List<BuildRecord> records = new ArrayList<>();
         long cutoff = now - (historyDays * DAY_MS);
         for (WorkflowRun run : job.getBuilds()) {
             if (!run.isBuilding() && run.getStartTimeInMillis() < cutoff) break;
+            Result res = run.getResult();
+            String resultStr = run.isBuilding() ? "BUILDING" : (res != null ? res.toString() : "UNKNOWN");
             records.add(new BuildRecord(
                     run.getNumber(),
-                    run.isBuilding() ? "BUILDING"
-                            : (run.getResult() != null ? run.getResult().toString() : "UNKNOWN"),
+                    resultStr,
                     run.getDuration(),
                     run.getStartTimeInMillis(),
                     run.isBuilding()));
             if (records.size() >= MAX_BUILDS_PER_PIPELINE) break;
         }
-        BUILD_CACHE.put(cacheKey, new CachedBuilds(records));
+        BUILD_CACHE.put(cacheKey, records);
         return records;
     }
 
     private JSONArray extractSuccessDurations(List<BuildRecord> records) {
         List<Integer> seconds = new ArrayList<>();
         for (BuildRecord r : records) {
-            if (r.building) continue;
-            if (!"SUCCESS".equals(r.result)) continue;
-            if (r.durationMs <= 1000) continue;
-            seconds.add((int) (r.durationMs / 1000));
+            if (r.building()) continue;
+            if (!"SUCCESS".equals(r.result())) continue;
+            if (r.durationMs() <= 1000) continue;
+            seconds.add((int) (r.durationMs() / 1000));
             if (seconds.size() >= EXEC_TIMES_LEN) break;
         }
         Collections.reverse(seconds);
@@ -703,10 +742,10 @@ public class OverviewDataService {
         for (BuildRecord r : records) {
             if (dots.size() >= HISTORY_DOTS_LEN) break;
             String s;
-            if (r.building) s = "building";
-            else if ("SUCCESS".equals(r.result)) s = "ok";
-            else if ("FAILURE".equals(r.result)) s = "fail";
-            else if ("UNSTABLE".equals(r.result)) s = "unstable";
+            if (r.building()) s = "building";
+            else if ("SUCCESS".equals(r.result())) s = "ok";
+            else if ("FAILURE".equals(r.result())) s = "fail";
+            else if ("UNSTABLE".equals(r.result())) s = "unstable";
             else s = "skipped";
             dots.add(s);
         }
@@ -767,9 +806,7 @@ public class OverviewDataService {
         for (Computer c : jenkins.getComputers()) {
             String name = c.getName();
             if (name == null || name.isEmpty()) continue;
-            try {
-                if (c instanceof hudson.slaves.AbstractCloudComputer) continue;
-            } catch (NoClassDefFoundError ignored) {}
+            if (c instanceof hudson.slaves.AbstractCloudComputer) continue;
 
             JSONObject ag = new JSONObject();
             ag.put("name", name);
@@ -785,24 +822,7 @@ public class OverviewDataService {
 
         for (Cloud cloud : jenkins.clouds) {
             JSONObject cl = new JSONObject();
-            cl.put("name", cloud.name);
-            int hot = 0;
-            int max = 0;
-            try {
-                java.lang.reflect.Method m = cloud.getClass().getMethod("getMaxSize");
-                Object v = m.invoke(cloud);
-                if (v instanceof Number) max = ((Number) v).intValue();
-            } catch (Exception ignored) {}
-            for (Computer c : jenkins.getComputers()) {
-                if (c.getName() == null || c.getName().isEmpty()) continue;
-                try {
-                    if (!(c instanceof hudson.slaves.AbstractCloudComputer)) continue;
-                } catch (NoClassDefFoundError e) { continue; }
-                if (!c.isOnline()) continue;
-                if (c.getName().contains(cloud.name) || c.getName().startsWith(cloud.name)) hot++;
-            }
-            cl.put("hot", hot);
-            cl.put("max", max);
+            cl.put("name", cloud.getDisplayName());
             clouds.add(cl);
         }
 
@@ -853,20 +873,6 @@ public class OverviewDataService {
         return Math.round(v * 10.0) / 10.0;
     }
 
-    private void evictStaleCache() {
-        long cutoff = System.currentTimeMillis() - 300_000;
-        BUILD_CACHE.entrySet().removeIf(e -> e.getValue().timestamp < cutoff);
-        if (STAGE_TOPO_CACHE.size() > 500) {
-            int target = STAGE_TOPO_CACHE.size() / 2;
-            int removed = 0;
-            for (String k : new ArrayList<>(STAGE_TOPO_CACHE.keySet())) {
-                if (removed >= target) break;
-                STAGE_TOPO_CACHE.remove(k);
-                removed++;
-            }
-        }
-    }
-
     private static class PipelineSnapshot {
         String jobName;
         String displayName;
@@ -874,7 +880,6 @@ public class OverviewDataService {
         List<BuildRecord> records = Collections.emptyList();
         int lastBuildNumber;
         String lastBuildUrl = "#";
-        long lastBuildTimeMs;
         String lastResult;
         boolean building;
         JSONArray stagesTopology;
@@ -891,30 +896,61 @@ public class OverviewDataService {
         String failedStageName;
     }
 
-    private static class BuildRecord {
-        final int number;
-        final String result;
-        final long durationMs;
-        final long startTimeMs;
-        final boolean building;
-        BuildRecord(int number, String result, long durationMs, long startTimeMs, boolean building) {
-            this.number = number;
-            this.result = result;
-            this.durationMs = durationMs;
-            this.startTimeMs = startTimeMs;
-            this.building = building;
-        }
-    }
+    private record BuildRecord(int number, String result, long durationMs, long startTimeMs, boolean building) {}
 
-    private static class CachedBuilds {
-        final List<BuildRecord> records;
-        final long timestamp;
-        CachedBuilds(List<BuildRecord> records) {
-            this.records = records;
-            this.timestamp = System.currentTimeMillis();
+    /**
+     * Collects the stages of one parallel branch. The branch's displayable sequence is
+     * its leaf stages (a stage that encloses another branch stage is just a container);
+     * the branch status is the worst of those leaves so a running leaf surfaces as building.
+     */
+    private class BranchAccum {
+        final BlockStartNode wrapper;
+        final List<FlowNode> nodes = new ArrayList<>();
+        final List<String> statuses = new ArrayList<>();
+
+        BranchAccum(BlockStartNode wrapper) { this.wrapper = wrapper; }
+
+        void add(FlowNode n, String status) { nodes.add(n); statuses.add(status); }
+
+        JSONObject toJson() {
+            Set<String> ids = new HashSet<>();
+            for (FlowNode n : nodes) ids.add(n.getId());
+            Set<String> nonLeaf = new HashSet<>();
+            for (FlowNode n : nodes) {
+                List<? extends BlockStartNode> enc = n.getEnclosingBlocks();
+                if (enc == null) continue;
+                for (BlockStartNode b : enc) if (ids.contains(b.getId())) nonLeaf.add(b.getId());
+            }
+            List<Integer> leaves = new ArrayList<>();
+            for (int i = 0; i < nodes.size(); i++) {
+                if (!nonLeaf.contains(nodes.get(i).getId())) leaves.add(i);
+            }
+            if (leaves.isEmpty()) for (int i = 0; i < nodes.size(); i++) leaves.add(i);
+            leaves.sort(Comparator.comparingLong(i -> startTimeOf(nodes.get(i))));
+
+            JSONArray stages = new JSONArray();
+            String aggStatus = "skipped";
+            for (int i : leaves) {
+                JSONObject st = new JSONObject();
+                st.put("name", labelOf(nodes.get(i)));
+                st.put("status", statuses.get(i));
+                stages.add(st);
+                if (statusRankStr(statuses.get(i)) > statusRankStr(aggStatus)) aggStatus = statuses.get(i);
+            }
+            JSONObject branch = new JSONObject();
+            branch.put("name", branchName());
+            branch.put("status", aggStatus);
+            branch.put("stages", stages);
+            return branch;
         }
-        boolean isExpired() {
-            return System.currentTimeMillis() - timestamp > BUILD_CACHE_TTL_MS;
+
+        private String branchName() {
+            if (wrapper != null) {
+                ThreadNameAction tna = wrapper.getAction(ThreadNameAction.class);
+                if (tna != null && tna.getThreadName() != null) return tna.getThreadName();
+                return labelOf(wrapper);
+            }
+            return nodes.isEmpty() ? "" : labelOf(nodes.get(0));
         }
     }
 }

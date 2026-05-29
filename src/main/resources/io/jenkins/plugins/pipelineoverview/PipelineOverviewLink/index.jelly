@@ -12,13 +12,9 @@
                  data-root-url="${rootURL}"
                  data-refresh-interval="${it.view.refreshIntervalSeconds}"
                  data-dashboard-title="${it.view.dashboardTitle}"
-                 data-header-message="${it.view.headerMessage}"
-                 data-fullscreen="true"
-                 data-crumb-field="${h.getCrumbRequestField()}"
-                 data-crumb-value="${h.getCrumb(request)}">
+                 data-fullscreen="true">
                 <div class="od-loading">
-                    <l:spinner />
-                    <p>Loading dashboard data&#8230;</p>
+                    <l:spinner text="Loading dashboard data" />
                 </div>
             </div>
 
