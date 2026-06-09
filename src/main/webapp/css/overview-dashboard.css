@@ -58,8 +58,8 @@ body:not(.od-kiosk) #overview-dashboard {
   --od-text: var(--text-color, #eaf0f7);
   --od-text-muted: var(--text-color-secondary, #8593a8);
   --od-text-dim: var(--text-color-secondary, #4d5668);
-  --od-border: var(--medium-grey, var(--card-border-color, #262e3e));
-  --od-border-strong: var(--dark-grey, var(--text-color-secondary, #3a4458));
+  --od-border: var(--card-border-color, #262e3e);
+  --od-border-strong: var(--card-border-color, #3a4458);
 }
 body.od-kiosk #main-panel,
 body.od-kiosk .jenkins-app-bar,
@@ -118,10 +118,14 @@ body.od-kiosk #overview-dashboard {
 .dashboard {
   display: grid;
   grid-template-rows: auto auto auto auto auto auto auto;
+  align-content: start;
   min-height: 100vh;
   gap: 12px;
   padding: 16px 24px;
 }
+/* Embedded as a view: take natural height instead of forcing a full viewport,
+   which otherwise leaves large empty bands around the sections. */
+body:not(.od-kiosk) .dashboard { min-height: auto; }
 
 /* Command strip */
 .cmd-strip {
@@ -885,7 +889,7 @@ body.od-kiosk #overview-dashboard {
   cursor: pointer;
   transition: stroke 0.15s, filter 0.15s;
 }
-.pg-node:hover { stroke: rgba(255, 255, 255, 0.7); stroke-width: 1.6; filter: brightness(1.25); }
+.pg-node:hover { stroke: var(--od-text-muted); stroke-width: 1.6; filter: brightness(1.25); }
 .pg-glyph {
   stroke: rgba(255, 255, 255, 0.92);
   stroke-width: 1.4;
@@ -909,14 +913,14 @@ body.od-kiosk #overview-dashboard {
 }
 
 .pg-line {
-  stroke: rgba(255, 255, 255, 0.18);
+  stroke: var(--od-border-strong);
   stroke-width: 1.5;
   fill: none;
 }
 .pg-line.skipped { stroke: rgba(77, 86, 104, 0.35); stroke-dasharray: 2 3; }
 
 .pg-label {
-  fill: rgba(255, 255, 255, 0.75);
+  fill: var(--od-text-muted);
   font-family: var(--od-mono);
   font-weight: 600;
   pointer-events: none;
@@ -924,7 +928,7 @@ body.od-kiosk #overview-dashboard {
 }
 .pg-label.fail { fill: var(--od-red); font-weight: 700; }
 .pg-label.unstable { fill: var(--od-amber); font-weight: 700; }
-.pg-label.skipped { fill: rgba(255, 255, 255, 0.35); font-style: italic; }
+.pg-label.skipped { fill: var(--od-text-dim); font-style: italic; }
 .pg-label.building { fill: var(--od-cyan); font-weight: 700; }
 
 .tt-label { display: block; margin-top: 3px; font-weight: 400; opacity: 0.7; }
