@@ -14,21 +14,17 @@ below that:
 * **just regressed** flags pipelines that were green for at least 6h then broke in the last 24h. the scariest class of failure because something just changed.
 * **currently broken** shows pipelines whose latest build failed. fresh regressions (broke in the last 24h after >= 6h green) get the top cards so today's actionable failures don't get buried; the rest follow, longest-broken first.
 * **currently unstable** is its own smaller section, separate from broken, since "tests failed but build completed" is a different problem from "the build itself blew up".
-* **pipeline health** expands per group, each pipeline rendered like jenkins' native stage view but smaller, with curved bezier connectors and parallel branches fanning out vertically.
+* **pipeline health** expands per group, each pipeline rendered like jenkins' native stage view but smaller, with curved bezier connectors. parallel branches fan out vertically, each branch keeping its own inner stage sequence.
 * **exec time graph** per pipeline shows the last 30 *successful* build durations as a sparkline + avg + range. trend chip lights up amber if builds are getting consistently slower (↑ %) or green if faster (↓ %).
 * **build queue** with a 60-sample sparkline. sustained queue depth is your signal to add agents.
 * **lockable resources** pulses amber after 15min held, red after 30min. catches stuck CI environments before someone notices manually.
 * **agents** panel at the bottom (k3s + ec2 fleet style).
 
-clicking the "Pipeline Overview" entry in the jenkins sidebar opens the dashboard fullscreen with a tiny back button. bookmark that URL on your TV browser and walk away.
-
 ## install
 
-not on the jenkins update site. two ways:
+Manage Jenkins → Plugins → Available plugins, search **Holistic**, install, and restart. With JCasC or a plugins list, add `holistic`.
 
-**drop the HPI in.** download `holistic.hpi` from a release (or `mvn package` it yourself), put it in `$JENKINS_HOME/plugins/`, restart jenkins.
-
-**bake it into a docker image.**
+Offline / air-gapped: grab `holistic.hpi` from a [release](https://github.com/jenkinsci/holistic-plugin/releases) (or `mvn package` it yourself) and drop it in `$JENKINS_HOME/plugins/`, or bake it into a docker image:
 ```dockerfile
 COPY holistic.hpi /usr/share/jenkins/ref/plugins/
 ```
@@ -77,8 +73,16 @@ other knobs:
 * `refreshIntervalSeconds`. how often the dashboard re-fetches. default 30, min 5.
 * `historyDays`. how far back to look for week stats, exec times, regression detection. default 30, max 90. pipelines with no builds in this window get filtered out as inactive.
 * `dashboardTitle`. heading text in the command strip.
-* `headerMessage`. optional sub-header text.
 * `autoExcludeFolders`. list of folder prefixes auto-discover should skip, e.g. `["sonar", "releases"]` if you want to ignore sonar scan jobs.
+
+## opening the dashboard
+
+once a view is configured (above), there are two ways to open it:
+
+* **embedded** — open the view from the Jenkins views bar (or `/view/<name>/`). renders inside Jenkins with the normal sidebar and breadcrumbs. good for day-to-day use; respects the active Jenkins theme (light or dark).
+* **full-screen** — click **Pipeline Overview** in the left sidebar. opens the dashboard chromeless and full-screen with a small "← Jenkins" back button, sized to be read across the room. bookmark that URL (`/pipeline-overview/`) on your office TV browser and walk away.
+
+both render the same dashboard off the same view config; the full-screen entry just drops the Jenkins chrome.
 
 ## how the metrics are calculated
 
@@ -91,7 +95,7 @@ other knobs:
 | queue / avg wait | live `Jenkins.get().getQueue().getItems()` count + avg time items have been waiting |
 | agents | healthy / total **permanent** agents (cloud agents shown separately at the bottom) |
 | just regressed | green for >= 6h, broke in the last 24h |
-| stage status (per pipeline) | FlowGraph node-level statuses are the source of truth, including aggregation across inner parallel branches that pipeline-rest-api filters out. `RunExt.getStages()` is consulted only to surface `IN_PROGRESS` / `PAUSED_PENDING_INPUT` while a build is mid-flight; if it reports a terminal status on a stage with no actual node activity (the build's overall result getting propagated down to stages that never ran), that's treated as `NOT_EXECUTED` so downstream stages render skipped instead of red |
+| stage status (per pipeline) | `RunExt.getStages()` (pipeline-rest-api) is authoritative for whether a stage ran and its terminal result, so a stage skipped after an earlier failure renders as `NOT_EXECUTED` (skipped) instead of green. the FlowGraph node statuses are only allowed to *escalate* a stage to a worse status (e.g. a junit/jacoco publisher flipping a `SUCCESS` stage to `UNSTABLE`), and to surface `IN_PROGRESS` / `PAUSED_PENDING_INPUT` while a build is mid-flight. parallel branches keep their nested inner-stage sequence rather than being flattened |
 | exec time graph | last 30 *successful* runs only. failed/aborted would skew the trend |
 
 ## live preview
@@ -104,12 +108,12 @@ open `docs/preview.html` in a browser. it mocks the data so the dashboard render
 mvn package
 ```
 
-needs JDK 17+, maven 3.6+. targets jenkins 2.541+. depends on `workflow-api`, `workflow-job`, `pipeline-rest-api`, `ionicons-api`. `lockable-resources` is detected at runtime via reflection so you don't need to install it.
+needs JDK 17+, maven 3.6+. targets jenkins 2.541+. depends on `workflow-api`, `workflow-job`, `pipeline-rest-api`, `ionicons-api`, `caffeine-api`. `lockable-resources` is an optional dependency: the locks panel only loads when that plugin is installed, otherwise it's skipped.
 
 ## stuff worth knowing
 
 * multibranch jobs: auto-discover treats `<multibranch>/main` as one entry. branches matching `PR-*` get skipped.
-* declarative `parallel { stage(...) }` blocks render as fanned-out branches, same shape as jenkins' native stage view.
+* declarative `parallel { stage(...) }` blocks render as fanned-out branches; a branch with nested stages keeps that inner sequence, the same shape as jenkins' native stage view.
 * folder-organised jobs (`releases/X`, `sonar/X`) get the top-level folder name as their group.
 * the `historyDays` window is doing a lot of work. pipelines with no builds in it get filtered out entirely. so a pipeline that's been broken for 3 months but nobody touches won't show up unless you bump the window.
 * if a build is UNSTABLE because a post-build test publisher (junit/jacoco) flagged it, but every individual stage was technically SUCCESS, the dashboard propagates UNSTABLE to the last non-skipped stage so the visual matches the build's overall result.
