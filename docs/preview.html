@@ -259,8 +259,8 @@ const SAMPLE_DATA = {
   hiddenInactive: 8,
   queueHistory: [0,0,1,2,2,1,1,0,0,1,2,3,3,2,2,1,1,0,0,1,2,3,3,4,3,2,2,2,2,2],
   locks: [
-    { name: 'production-cluster', status: 'held', holdMs: 23 * 60 * 1000, stale: true },
-    { name: 'staging-cluster',    status: 'held', holdMs: 3 * 60 * 1000,  stale: false },
+    { name: 'production-cluster', status: 'held', holdMs: 37 * 60 * 1000, stale: true },
+    { name: 'staging-cluster',    status: 'held', holdMs: 18 * 60 * 1000, stale: false },
     { name: 'pre-prod-env',       status: 'free', holdMs: 0, stale: false },
     { name: 'smoke-env',          status: 'free', holdMs: 0, stale: false },
   ],
@@ -283,14 +283,15 @@ const SAMPLE_DATA = {
   }
 };
 
-window.XMLHttpRequest = function () {
-  this.open = function () {};
-  this.setRequestHeader = function () {};
-  this.send = function () {
-    this.status = 200;
-    this.responseText = JSON.stringify(SAMPLE_DATA);
-    if (typeof this.onload === 'function') this.onload();
-  };
+// The dashboard fetches its data and wraps a CSRF crumb; stub both so the
+// real overview-dashboard.js renders SAMPLE_DATA without a Jenkins backend.
+window.crumb = { wrap: function (headers) { return headers || {}; } };
+window.fetch = function () {
+  return Promise.resolve({
+    ok: true,
+    status: 200,
+    json: function () { return Promise.resolve(SAMPLE_DATA); }
+  });
 };
 </script>
 

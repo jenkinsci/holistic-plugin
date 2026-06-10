@@ -20,6 +20,10 @@ below that:
 * **lockable resources** pulses amber after 15min held, red after 30min. catches stuck CI environments before someone notices manually.
 * **agents** panel at the bottom (k3s + ec2 fleet style).
 
+the lockable resources panel only shows when the [lockable-resources](https://plugins.jenkins.io/lockable-resources/) plugin is installed, and it sorts the most-stuck locks to the top so a resource held far too long is the first thing you see:
+
+![lockable resources, longest-held first](docs/lockable-resources.png)
+
 ## install
 
 Manage Jenkins → Plugins → Available plugins, search **Holistic**, install, and restart. With JCasC or a plugins list, add `holistic`.
@@ -79,10 +83,14 @@ other knobs:
 
 once a view is configured (above), there are two ways to open it:
 
-* **embedded** — open the view from the Jenkins views bar (or `/view/<name>/`). renders inside Jenkins with the normal sidebar and breadcrumbs. good for day-to-day use; respects the active Jenkins theme (light or dark).
-* **full-screen** — click **Pipeline Overview** in the left sidebar. opens the dashboard chromeless and full-screen with a small "← Jenkins" back button, sized to be read across the room. bookmark that URL (`/pipeline-overview/`) on your office TV browser and walk away.
+* **embedded**: open the view from the Jenkins views bar (or `/view/<name>/`). renders inside Jenkins with the normal sidebar and breadcrumbs. good for day-to-day use, and it respects the active Jenkins theme (light or dark).
+* **full-screen**: click **Pipeline Overview** in the left sidebar. opens the dashboard chromeless and full-screen with a small "← Jenkins" back button, sized to be read across the room. bookmark that URL (`/pipeline-overview/`) on your office TV browser and walk away.
 
 both render the same dashboard off the same view config; the full-screen entry just drops the Jenkins chrome.
+
+the embedded view follows the active Jenkins theme. the dark full-screen look is at the top of this README; here is the same dashboard in a light theme:
+
+![embedded view, light theme](docs/integrated.png)
 
 ## how the metrics are calculated
 

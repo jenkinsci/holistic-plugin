@@ -904,10 +904,12 @@
     if (!locks || locks.length === 0) {
       body = '<div class="panel-empty">no lockable resources configured</div>';
     } else {
-      const sorted = locks.slice().sort((a, b) => {
+      const rankOf = l => {
         const order = { crit: 0, warn: 1, active: 2, free: 3 };
-        return (order[lockClass(a)] || 9) - (order[lockClass(b)] || 9);
-      });
+        const r = order[lockClass(l)];
+        return r == null ? 9 : r;
+      };
+      const sorted = locks.slice().sort((a, b) => rankOf(a) - rankOf(b));
       body = '<div class="locks-list">' + sorted.map(l => {
         const cls = lockClass(l);
         const status = l.status === 'free' ? 'free' :
