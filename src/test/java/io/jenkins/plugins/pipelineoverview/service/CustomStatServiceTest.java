@@ -271,6 +271,7 @@ class CustomStatServiceTest {
     void watchdogReleasesAThreadBlockedOnASilentSocket() throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         CountDownLatch handlerEntered = new CountDownLatch(1);
+        CountDownLatch handlerRelease = new CountDownLatch(1);
         server.createContext("/silent", exchange -> {
             exchange.sendResponseHeaders(200, 0);
             OutputStream os = exchange.getResponseBody();
@@ -278,7 +279,7 @@ class CustomStatServiceTest {
             os.flush();
             handlerEntered.countDown();
             try {
-                Thread.sleep(60_000);
+                handlerRelease.await(60, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
@@ -301,6 +302,7 @@ class CustomStatServiceTest {
             assertEquals(0, CustomStatService.inFlightCountForTesting(),
                     "watchdog must release a worker blocked reading a silent socket");
         } finally {
+            handlerRelease.countDown();
             server.stop(0);
         }
     }
