@@ -117,7 +117,7 @@ class HttpJsonStatSourceCredentialsTest {
                         Secret.fromString("s3cr3t")));
         HttpJsonStatSource.DescriptorImpl d = j.jenkins
                 .getDescriptorByType(HttpJsonStatSource.DescriptorImpl.class);
-        assertTrue(d.doFillCredentialsIdItems(null, "").stream()
+        assertTrue(d.doFillCredentialsIdItems("").stream()
                 .anyMatch(o -> "tok2".equals(o.value)));
     }
 
@@ -133,7 +133,7 @@ class HttpJsonStatSourceCredentialsTest {
                 .getDescriptorByType(HttpJsonStatSource.DescriptorImpl.class);
         ListBoxModel options;
         try (ACLContext ctx = ACL.as(User.getById("alice", true))) {
-            options = d.doFillCredentialsIdItems(null, "previously-selected-id");
+            options = d.doFillCredentialsIdItems("previously-selected-id");
         }
         assertFalse(options.stream().anyMatch(o -> "withheld".equals(o.value)));
         assertTrue(options.stream().anyMatch(o -> "previously-selected-id".equals(o.value)));

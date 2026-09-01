@@ -7,7 +7,6 @@ import com.cloudbees.plugins.credentials.common.StandardListBoxModel;
 import com.cloudbees.plugins.credentials.common.StandardUsernamePasswordCredentials;
 import hudson.Extension;
 import hudson.model.Descriptor;
-import hudson.model.Item;
 import hudson.security.ACL;
 import hudson.util.FormValidation;
 import hudson.util.ListBoxModel;
@@ -15,7 +14,6 @@ import io.jenkins.plugins.pipelineoverview.Messages;
 import jenkins.model.Jenkins;
 import org.jenkinsci.Symbol;
 import org.jenkinsci.plugins.plaincredentials.StringCredentials;
-import org.kohsuke.stapler.AncestorInPath;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
@@ -76,6 +74,11 @@ public class HttpJsonStatSource extends StatSource {
     @Override
     public int getRefreshSeconds() {
         return Math.max(MIN_REFRESH_SECONDS, refreshSeconds);
+    }
+
+    @Override
+    public boolean referencesCredentials() {
+        return !getCredentialsId().isEmpty();
     }
 
     @DataBoundSetter
@@ -223,16 +226,10 @@ public class HttpJsonStatSource extends StatSource {
         }
 
         @POST
-        public ListBoxModel doFillCredentialsIdItems(@AncestorInPath Item item,
-                                                     @QueryParameter String credentialsId) {
+        public ListBoxModel doFillCredentialsIdItems(@QueryParameter String credentialsId) {
             StandardListBoxModel model = new StandardListBoxModel();
             Jenkins jenkins = Jenkins.get();
-            if (item == null) {
-                if (!jenkins.hasPermission(Jenkins.ADMINISTER)) {
-                    return model.includeCurrentValue(credentialsId);
-                }
-            } else if (!item.hasPermission(Item.EXTENDED_READ)
-                    && !item.hasPermission(CredentialsProvider.USE_ITEM)) {
+            if (!jenkins.hasPermission(Jenkins.ADMINISTER)) {
                 return model.includeCurrentValue(credentialsId);
             }
             return model

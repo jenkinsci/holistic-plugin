@@ -140,7 +140,10 @@ intervals rather than silently lying.
 endpoints behind an internal CA need that CA in the jenkins controller's JVM truststore. there is
 no TLS verification bypass option and there will not be one.
 
-adding a stat requires permission to configure the view.
+adding a stat requires permission to configure the view. saving a view whose stats reference a
+`credentialsId` additionally requires overall jenkins administer permission, because the stored
+secret is sent to whatever url the stat names. a non-administrator with view configure permission
+can still add and edit stats that use no credential.
 
 ## opening the dashboard
 

@@ -15,4 +15,8 @@ public abstract class StatSource extends AbstractDescribableImpl<StatSource>
     public abstract String cacheKey();
 
     public abstract int getRefreshSeconds();
+
+    public boolean referencesCredentials() {
+        return false;
+    }
 }

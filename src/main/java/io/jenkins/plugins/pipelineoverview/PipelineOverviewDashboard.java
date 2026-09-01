@@ -13,6 +13,7 @@ import hudson.util.FormValidation;
 import io.jenkins.plugins.pipelineoverview.service.CustomStatService;
 import io.jenkins.plugins.pipelineoverview.service.OverviewDataService;
 import io.jenkins.plugins.pipelineoverview.stats.CustomStat;
+import io.jenkins.plugins.pipelineoverview.stats.StatSource;
 import jenkins.model.Jenkins;
 import net.sf.json.JSONObject;
 import org.jenkinsci.Symbol;
@@ -243,6 +244,17 @@ public class PipelineOverviewDashboard extends View {
     protected void submit(StaplerRequest2 req)
             throws IOException, ServletException, Descriptor.FormException {
         JSONObject json = req.getSubmittedForm();
+
+        Object statsData = json.opt("customStats");
+        List<CustomStat> submittedStats = statsData != null
+                ? req.bindJSONToList(CustomStat.class, statsData)
+                : new ArrayList<>();
+        if (referencesCredentials(submittedStats)
+                && !Jenkins.get().hasPermission(Jenkins.ADMINISTER)) {
+            throw new Descriptor.FormException(
+                    Messages.PipelineOverviewDashboard_CredentialsNeedAdminister(), "customStats");
+        }
+
         this.refreshIntervalSeconds = Math.max(5, json.optInt("refreshIntervalSeconds", 30));
         this.historyDays = Math.max(1, Math.min(90, json.optInt("historyDays", 30)));
         this.headerMessage = json.optString("headerMessage", "");
@@ -257,12 +269,15 @@ public class PipelineOverviewDashboard extends View {
             this.groups = new ArrayList<>();
         }
 
-        Object statsData = json.opt("customStats");
-        if (statsData != null) {
-            this.customStats = req.bindJSONToList(CustomStat.class, statsData);
-        } else {
-            this.customStats = new ArrayList<>();
+        this.customStats = submittedStats;
+    }
+
+    private static boolean referencesCredentials(List<CustomStat> stats) {
+        for (CustomStat stat : stats) {
+            StatSource source = stat.getSource();
+            if (source != null && source.referencesCredentials()) return true;
         }
+        return false;
     }
 
     boolean renameJob(String oldFullName, String newFullName) {
