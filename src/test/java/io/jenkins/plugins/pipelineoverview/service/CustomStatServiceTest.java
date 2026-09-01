@@ -1,6 +1,7 @@
 package io.jenkins.plugins.pipelineoverview.service;
 
 import com.sun.net.httpserver.HttpServer;
+import hudson.init.Terminator;
 import io.jenkins.plugins.pipelineoverview.stats.CustomStat;
 import io.jenkins.plugins.pipelineoverview.stats.HttpJsonStatSource;
 import io.jenkins.plugins.pipelineoverview.stats.StatSource;
@@ -8,19 +9,29 @@ import io.jenkins.plugins.pipelineoverview.stats.StatValue;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class CustomStatServiceTest {
 
     private long now = 1_700_000_000_000L;
@@ -305,5 +316,60 @@ class CustomStatServiceTest {
             handlerRelease.countDown();
             server.stop(0);
         }
+    }
+
+    private static ThreadPoolExecutor refreshPool() throws Exception {
+        Field field = CustomStatService.class.getDeclaredField("POOL");
+        field.setAccessible(true);
+        return (ThreadPoolExecutor) field.get(null);
+    }
+
+    private static ExecutorService watchdogPool() throws Exception {
+        Field field = CustomStatService.class.getDeclaredField("WATCHDOG");
+        field.setAccessible(true);
+        return (ExecutorService) field.get(null);
+    }
+
+    @Test
+    void aSubmitThatThrowsDoesNotWedgeTheKey() throws Exception {
+        ThreadPoolExecutor pool = refreshPool();
+        ThreadFactory original = pool.getThreadFactory();
+        FakeSource src = new FakeSource("k-submit-throws", StatValue.numeric(1, now));
+        JSONObject json;
+        try {
+            pool.setMaximumPoolSize(8);
+            pool.setCorePoolSize(8);
+            pool.setThreadFactory(runnable -> {
+                throw new SecurityException("thread creation denied");
+            });
+
+            json = only(service().snapshot(List.of(stat("A", src))));
+        } finally {
+            pool.setThreadFactory(original);
+            pool.setCorePoolSize(2);
+            pool.setMaximumPoolSize(2);
+            pool.getQueue().clear();
+        }
+
+        assertEquals("error", json.getString("state"));
+        assertEquals(0, src.calls.get(), "the refresh must never have run");
+        assertEquals(0, CustomStatService.inFlightCountForTesting(),
+                "a submit that throws must not leave the key in flight");
+    }
+
+    @Test
+    @Order(Integer.MAX_VALUE)
+    void terminatorShutsDownBothExecutors() throws Exception {
+        Method shutdown = CustomStatService.class.getDeclaredMethod("shutdown");
+        assertTrue(Modifier.isStatic(shutdown.getModifiers()), "the terminator must be static");
+        assertTrue(shutdown.isAnnotationPresent(Terminator.class),
+                "Jenkins only runs the shutdown if it is annotated as a terminator");
+
+        CustomStatService.shutdown();
+
+        assertTrue(refreshPool().awaitTermination(5, TimeUnit.SECONDS),
+                "the refresh pool must terminate");
+        assertTrue(watchdogPool().awaitTermination(5, TimeUnit.SECONDS),
+                "the watchdog must terminate");
     }
 }

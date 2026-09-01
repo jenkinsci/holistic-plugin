@@ -2,6 +2,7 @@ package io.jenkins.plugins.pipelineoverview.service;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import hudson.init.Terminator;
 import io.jenkins.plugins.pipelineoverview.stats.CustomStat;
 import io.jenkins.plugins.pipelineoverview.stats.StatSource;
 import io.jenkins.plugins.pipelineoverview.stats.StatValue;
@@ -146,8 +147,9 @@ public class CustomStatService {
 
     private void scheduleRefresh(String key, StatSource source, long attemptAt) {
         if (!IN_FLIGHT.add(key)) return;
+        Future<?> task;
         try {
-            Future<?> task = POOL.submit(() -> {
+            task = POOL.submit(() -> {
                 try {
                     StatValue value = source.fetch();
                     CACHE.put(key, new Entry(value, attemptAt, attemptAt));
@@ -162,13 +164,28 @@ public class CustomStatService {
                     IN_FLIGHT.remove(key);
                 }
             });
+        } catch (RejectedExecutionException e) {
+            IN_FLIGHT.remove(key);
+            LOGGER.log(Level.FINE, "Custom stat refresh queue is full, skipping this cycle");
+            return;
+        } catch (Throwable t) {
+            IN_FLIGHT.remove(key);
+            throw t;
+        }
+        try {
             WATCHDOG.schedule(() -> {
                 if (task.cancel(true)) IN_FLIGHT.remove(key);
             }, fetchTimeoutMs, TimeUnit.MILLISECONDS);
         } catch (RejectedExecutionException e) {
-            IN_FLIGHT.remove(key);
-            LOGGER.log(Level.FINE, "Custom stat refresh queue is full, skipping this cycle");
+            if (task.cancel(true)) IN_FLIGHT.remove(key);
+            LOGGER.log(Level.FINE, "Custom stat watchdog is unavailable, cancelling this refresh");
         }
+    }
+
+    @Terminator
+    public static void shutdown() {
+        POOL.shutdownNow();
+        WATCHDOG.shutdownNow();
     }
 
     static void clearCacheForTesting() {
