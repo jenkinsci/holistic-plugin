@@ -37,24 +37,31 @@ public class CustomStatService {
 
     private static final Set<String> IN_FLIGHT = ConcurrentHashMap.newKeySet();
 
-    private static final ThreadPoolExecutor POOL = new ThreadPoolExecutor(
-            2, 2, 0L, TimeUnit.MILLISECONDS,
-            new ArrayBlockingQueue<>(32),
-            runnable -> {
-                Thread t = new Thread(runnable, "holistic-custom-stat-refresh");
-                t.setDaemon(true);
-                return t;
-            },
-            new ThreadPoolExecutor.AbortPolicy());
+    private static volatile ThreadPoolExecutor POOL = newRefreshPool();
 
     private static final long FETCH_TIMEOUT_MS = 30_000;
 
-    private static final ScheduledExecutorService WATCHDOG =
-            Executors.newSingleThreadScheduledExecutor(runnable -> {
-                Thread t = new Thread(runnable, "holistic-custom-stat-watchdog");
-                t.setDaemon(true);
-                return t;
-            });
+    private static volatile ScheduledExecutorService WATCHDOG = newWatchdog();
+
+    private static ThreadPoolExecutor newRefreshPool() {
+        return new ThreadPoolExecutor(
+                2, 2, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(32),
+                runnable -> {
+                    Thread t = new Thread(runnable, "holistic-custom-stat-refresh");
+                    t.setDaemon(true);
+                    return t;
+                },
+                new ThreadPoolExecutor.AbortPolicy());
+    }
+
+    private static ScheduledExecutorService newWatchdog() {
+        return Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread t = new Thread(runnable, "holistic-custom-stat-watchdog");
+            t.setDaemon(true);
+            return t;
+        });
+    }
 
     private final LongSupplier clock;
     private final long fetchTimeoutMs;
@@ -201,5 +208,17 @@ public class CustomStatService {
 
     static int inFlightCountForTesting() {
         return IN_FLIGHT.size();
+    }
+
+    static boolean awaitExecutorTerminationForTesting(long timeoutMs) throws InterruptedException {
+        return POOL.awaitTermination(timeoutMs, TimeUnit.MILLISECONDS)
+                && WATCHDOG.awaitTermination(timeoutMs, TimeUnit.MILLISECONDS);
+    }
+
+    static void restartExecutorsForTesting() {
+        POOL.shutdownNow();
+        WATCHDOG.shutdownNow();
+        POOL = newRefreshPool();
+        WATCHDOG = newWatchdog();
     }
 }

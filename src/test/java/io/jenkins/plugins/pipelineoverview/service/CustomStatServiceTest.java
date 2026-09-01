@@ -22,7 +22,6 @@ import java.lang.reflect.Modifier;
 import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -324,12 +323,6 @@ class CustomStatServiceTest {
         return (ThreadPoolExecutor) field.get(null);
     }
 
-    private static ExecutorService watchdogPool() throws Exception {
-        Field field = CustomStatService.class.getDeclaredField("WATCHDOG");
-        field.setAccessible(true);
-        return (ExecutorService) field.get(null);
-    }
-
     @Test
     void aSubmitThatThrowsDoesNotWedgeTheKey() throws Exception {
         ThreadPoolExecutor pool = refreshPool();
@@ -358,18 +351,19 @@ class CustomStatServiceTest {
     }
 
     @Test
-    @Order(Integer.MAX_VALUE)
+    @Order(Integer.MIN_VALUE)
     void terminatorShutsDownBothExecutors() throws Exception {
         Method shutdown = CustomStatService.class.getDeclaredMethod("shutdown");
         assertTrue(Modifier.isStatic(shutdown.getModifiers()), "the terminator must be static");
         assertTrue(shutdown.isAnnotationPresent(Terminator.class),
                 "Jenkins only runs the shutdown if it is annotated as a terminator");
+        try {
+            CustomStatService.shutdown();
 
-        CustomStatService.shutdown();
-
-        assertTrue(refreshPool().awaitTermination(5, TimeUnit.SECONDS),
-                "the refresh pool must terminate");
-        assertTrue(watchdogPool().awaitTermination(5, TimeUnit.SECONDS),
-                "the watchdog must terminate");
+            assertTrue(CustomStatService.awaitExecutorTerminationForTesting(5_000),
+                    "the terminator must shut down both executors");
+        } finally {
+            CustomStatService.restartExecutorsForTesting();
+        }
     }
 }
