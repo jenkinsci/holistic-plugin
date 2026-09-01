@@ -1,11 +1,21 @@
 package io.jenkins.plugins.pipelineoverview.stats;
 
+import com.cloudbees.plugins.credentials.CredentialsMatchers;
+import com.cloudbees.plugins.credentials.CredentialsProvider;
+import com.cloudbees.plugins.credentials.common.StandardCredentials;
+import com.cloudbees.plugins.credentials.common.StandardListBoxModel;
+import com.cloudbees.plugins.credentials.common.StandardUsernamePasswordCredentials;
 import hudson.Extension;
 import hudson.model.Descriptor;
+import hudson.model.Item;
+import hudson.security.ACL;
 import hudson.util.FormValidation;
+import hudson.util.ListBoxModel;
 import io.jenkins.plugins.pipelineoverview.Messages;
 import jenkins.model.Jenkins;
 import org.jenkinsci.Symbol;
+import org.jenkinsci.plugins.plaincredentials.StringCredentials;
+import org.kohsuke.stapler.AncestorInPath;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
@@ -23,7 +33,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
 
 public class HttpJsonStatSource extends StatSource {
     private static final long serialVersionUID = 1L;
@@ -87,6 +99,7 @@ public class HttpJsonStatSource extends StatSource {
                 .timeout(READ_TIMEOUT)
                 .header("Accept", "application/json")
                 .GET();
+        applyAuth(builder);
         HttpResponse<InputStream> response;
         try {
             response = CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
@@ -101,6 +114,27 @@ public class HttpJsonStatSource extends StatSource {
             String body = readCapped(in);
             return JsonPointerExtractor.extract(body, getPointer(), getMode(), System.currentTimeMillis());
         }
+    }
+
+    private void applyAuth(HttpRequest.Builder builder) throws IOException {
+        String id = getCredentialsId();
+        if (id.isEmpty()) return;
+        StandardCredentials credential = CredentialsMatchers.firstOrNull(
+                CredentialsProvider.lookupCredentialsInItemGroup(
+                        StandardCredentials.class, Jenkins.get(), ACL.SYSTEM2, List.of()),
+                CredentialsMatchers.withId(id));
+        if (credential instanceof StringCredentials secretText) {
+            builder.header("Authorization", "Bearer " + secretText.getSecret().getPlainText());
+            return;
+        }
+        if (credential instanceof StandardUsernamePasswordCredentials userPass) {
+            String raw = userPass.getUsername() + ":" + userPass.getPassword().getPlainText();
+            builder.header("Authorization", "Basic " + Base64.getEncoder()
+                    .encodeToString(raw.getBytes(StandardCharsets.UTF_8)));
+            return;
+        }
+        throw new IOException("Credential '" + id + "' was not found, or is not a secret text "
+                + "or username and password credential");
     }
 
     @Override
@@ -186,6 +220,29 @@ public class HttpJsonStatSource extends StatSource {
                 return FormValidation.error(Messages.HttpJsonStatSource_RefreshTooLow());
             }
             return FormValidation.ok();
+        }
+
+        @POST
+        public ListBoxModel doFillCredentialsIdItems(@AncestorInPath Item item,
+                                                     @QueryParameter String credentialsId) {
+            StandardListBoxModel model = new StandardListBoxModel();
+            Jenkins jenkins = Jenkins.get();
+            if (item == null) {
+                if (!jenkins.hasPermission(Jenkins.ADMINISTER)) {
+                    return model.includeCurrentValue(credentialsId);
+                }
+            } else if (!item.hasPermission(Item.EXTENDED_READ)
+                    && !item.hasPermission(CredentialsProvider.USE_ITEM)) {
+                return model.includeCurrentValue(credentialsId);
+            }
+            return model
+                    .includeEmptyValue()
+                    .includeMatchingAs(ACL.SYSTEM2, jenkins, StandardCredentials.class, List.of(),
+                            CredentialsMatchers.anyOf(
+                                    CredentialsMatchers.instanceOf(StringCredentials.class),
+                                    CredentialsMatchers.instanceOf(
+                                            StandardUsernamePasswordCredentials.class)))
+                    .includeCurrentValue(credentialsId);
         }
     }
 }
