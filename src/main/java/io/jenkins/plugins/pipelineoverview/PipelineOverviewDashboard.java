@@ -319,14 +319,7 @@ public class PipelineOverviewDashboard extends View {
             result.put("viewName", getDashboardTitle());
             result.put("headerMessage", getHeaderMessage());
 
-            try {
-                JSONObject summary = result.optJSONObject("summary");
-                if (summary != null) {
-                    summary.put("customStats", new CustomStatService().snapshot(getCustomStats()));
-                }
-            } catch (RuntimeException e) {
-                LOGGER.log(Level.WARNING, "Custom stats unavailable for this refresh", e);
-            }
+            applyCustomStats(result);
 
             rsp.getWriter().write(result.toString());
         } catch (Throwable t) {
@@ -336,6 +329,19 @@ public class PipelineOverviewDashboard extends View {
             error.put("error", (msg != null ? msg : t.getClass().getSimpleName()));
             error.put("timestamp", System.currentTimeMillis());
             rsp.getWriter().write(error.toString());
+        }
+    }
+
+
+    // Both the view and the full screen link serve this payload, so it lives here once.
+    void applyCustomStats(JSONObject result) {
+        try {
+            JSONObject summary = result.optJSONObject("summary");
+            if (summary != null) {
+                summary.put("customStats", new CustomStatService().snapshot(getCustomStats()));
+            }
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Custom stats unavailable for this refresh", e);
         }
     }
 

@@ -137,10 +137,66 @@ class CustomStatsViewTest {
     }
 
     private JSONObject fetchData(JenkinsRule j, JenkinsRule.WebClient wc) throws Exception {
-        WebRequest request = wc.addCrumb(new WebRequest(
-                new URL(j.getURL(), "view/dash/data"),
-                HttpMethod.POST));
+        return post(j, wc, "view/dash/data");
+    }
+
+    private JSONObject post(JenkinsRule j, JenkinsRule.WebClient wc, String path) throws Exception {
+        WebRequest request = wc.addCrumb(new WebRequest(new URL(j.getURL(), path), HttpMethod.POST));
         String json = wc.getPage(request).getWebResponse().getContentAsString();
         return JSONObject.fromObject(json);
+    }
+
+    @Test
+    void fullScreenEndpointCarriesCustomStats(JenkinsRule j) throws Exception {
+        resetCustomStatServiceExecutors();
+
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/envs", exchange -> {
+            byte[] body = "{\"items\":[1,2,3]}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(body);
+            }
+        });
+        server.start();
+        try {
+            CustomStat stat = new CustomStat("Preview Envs");
+            stat.setCapacity(5);
+            HttpJsonStatSource source = new HttpJsonStatSource(
+                    "http://127.0.0.1:" + server.getAddress().getPort() + "/envs");
+            source.setPointer("/items");
+            source.setMode(JsonPointerExtractor.Mode.COUNT);
+            stat.setSource(source);
+
+            PipelineOverviewDashboard view = new PipelineOverviewDashboard("dash");
+            view.setCustomStats(List.of(stat));
+            j.jenkins.addView(view);
+
+            JenkinsRule.WebClient wc = j.createWebClient();
+
+            JSONObject payload = null;
+            JSONObject customStat = null;
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (customStat == null && System.nanoTime() < deadline) {
+                payload = post(j, wc, "pipeline-overview/data");
+                JSONArray stats = payload.getJSONObject("summary").getJSONArray("customStats");
+                JSONObject candidate = stats.getJSONObject(0);
+                if (!"pending".equals(candidate.getString("state"))) {
+                    customStat = candidate;
+                } else {
+                    Thread.sleep(100);
+                }
+            }
+
+            assertNotNull(customStat,
+                    "full screen endpoint never resolved the stat within 10 seconds: " + payload);
+            assertEquals("Preview Envs", customStat.getString("label"));
+            assertEquals(3, customStat.getInt("value"));
+            assertTrue(payload.getJSONObject("summary").has("weekSuccessRate"),
+                    "built-in summary must still render: " + payload);
+        } finally {
+            server.stop(0);
+        }
     }
 }
