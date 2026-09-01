@@ -70,6 +70,7 @@ public class PipelineOverviewLink implements RootAction {
             JSONObject result = service.fetchDashboardData(view.getGroups(), view.getHistoryDays());
             result.put("viewName", view.getDashboardTitle());
             result.put("headerMessage", view.getHeaderMessage());
+            view.applyCustomStats(result);
             rsp.getWriter().write(result.toString());
         } catch (Throwable t) {
             LOGGER.log(Level.SEVERE, "Failed to build dashboard data", t);
