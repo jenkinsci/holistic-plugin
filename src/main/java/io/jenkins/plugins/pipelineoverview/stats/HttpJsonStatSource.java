@@ -94,11 +94,13 @@ public class HttpJsonStatSource extends StatSource {
             Thread.currentThread().interrupt();
             throw new IOException("Interrupted fetching " + safeTarget(uri), e);
         }
-        if (response.statusCode() / 100 != 2) {
-            throw new IOException("HTTP " + response.statusCode() + " from " + safeTarget(uri));
+        try (InputStream in = response.body()) {
+            if (response.statusCode() / 100 != 2) {
+                throw new IOException("HTTP " + response.statusCode() + " from " + safeTarget(uri));
+            }
+            String body = readCapped(in);
+            return JsonPointerExtractor.extract(body, getPointer(), getMode(), System.currentTimeMillis());
         }
-        String body = readCapped(response.body());
-        return JsonPointerExtractor.extract(body, getPointer(), getMode(), System.currentTimeMillis());
     }
 
     @Override
@@ -128,20 +130,22 @@ public class HttpJsonStatSource extends StatSource {
     }
 
     private static String readCapped(InputStream in) throws IOException {
-        try (in) {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buffer = new byte[8192];
-            int total = 0;
-            int read;
-            while ((read = in.read(buffer)) != -1) {
-                total += read;
-                if (total > MAX_BODY_BYTES) {
-                    throw new IOException("Response exceeds the 1 MB limit");
-                }
-                out.write(buffer, 0, read);
+        long deadline = System.nanoTime() + READ_TIMEOUT.toNanos();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int total = 0;
+        int read;
+        while ((read = in.read(buffer)) != -1) {
+            total += read;
+            if (total > MAX_BODY_BYTES) {
+                throw new IOException("Response exceeds the 1 MB limit");
             }
-            return out.toString(StandardCharsets.UTF_8);
+            if (System.nanoTime() > deadline) {
+                throw new IOException("Response body read timed out");
+            }
+            out.write(buffer, 0, read);
         }
+        return out.toString(StandardCharsets.UTF_8);
     }
 
     @Extension

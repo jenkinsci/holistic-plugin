@@ -9,11 +9,13 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HttpJsonStatSourceTest {
@@ -143,5 +145,27 @@ class HttpJsonStatSourceTest {
         assertEquals(a.cacheKey(), b.cacheKey());
         assertNotEquals(a.cacheKey(), c.cacheKey());
         assertFalse(a.cacheKey().contains("127.0.0.1"));
+    }
+
+    @Test
+    void slowBodyDripDoesNotHangPastReadTimeout() {
+        server.createContext("/drip", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream os = exchange.getResponseBody()) {
+                for (int i = 0; i < 15; i++) {
+                    os.write('{');
+                    os.flush();
+                    Thread.sleep(1000);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        HttpJsonStatSource s = source("/drip", "/a", JsonPointerExtractor.Mode.VALUE);
+        assertTimeoutPreemptively(Duration.ofSeconds(13), () -> {
+            IOException e = assertThrows(IOException.class, s::fetch);
+            assertTrue(e.getMessage().contains("timed out"));
+        });
     }
 }
