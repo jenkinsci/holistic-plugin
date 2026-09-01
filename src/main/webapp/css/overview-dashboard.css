@@ -220,6 +220,20 @@ body:not(.od-kiosk) .dashboard { min-height: auto; }
 .vital.warn .vital-value { color: var(--od-amber); }
 .vital.od-info .vital-value { color: var(--od-blue); }
 
+.vital.od-stat-stale .vital-value { color: var(--od-text-muted); }
+.vital.od-stat-stale .vital-label::after {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--od-amber);
+  vertical-align: middle;
+}
+a.vital { text-decoration: none; color: inherit; }
+a.vital:hover .vital-label { color: var(--od-text); }
+
 .od-kiosk-toggle {
   display: inline-flex;
   align-items: center;
