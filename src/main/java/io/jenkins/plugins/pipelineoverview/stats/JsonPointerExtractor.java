@@ -26,11 +26,11 @@ public final class JsonPointerExtractor {
         try {
             Object parsed = JSONSerializer.toJSON(body);
             if (!(parsed instanceof JSONObject) && !(parsed instanceof JSONArray)) {
-                throw new IOException("Response body is not a JSON object or array");
+                throw new IOException("Response body must be a JSON object or array");
             }
             return (JSON) parsed;
         } catch (JSONException e) {
-            throw new IOException("Response body is not valid JSON", e);
+            throw new IOException("Response body must be a JSON object or array", e);
         }
     }
 

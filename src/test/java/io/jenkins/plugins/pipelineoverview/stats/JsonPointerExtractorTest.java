@@ -126,4 +126,11 @@ class JsonPointerExtractorTest {
         assertThrows(IOException.class, () -> JsonPointerExtractor.extract(
                 "{\"a\":null}", "/a", JsonPointerExtractor.Mode.VALUE, AT));
     }
+
+    @Test
+    void bareScalarBodyIsAnError() {
+        IOException e = assertThrows(IOException.class, () -> JsonPointerExtractor.extract(
+                "42", "", JsonPointerExtractor.Mode.VALUE, AT));
+        assertTrue(e.getMessage().contains("JSON object or array"));
+    }
 }
