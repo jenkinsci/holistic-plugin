@@ -102,6 +102,18 @@ class HttpJsonStatSourceTest {
     }
 
     @Test
+    void errorMessageDoesNotLeakUrlUserInfo() {
+        respond("/creds", 500, "{}");
+        HttpJsonStatSource s = new HttpJsonStatSource(
+                "http://alice:hunter2@127.0.0.1:" + server.getAddress().getPort() + "/creds");
+        s.setPointer("/a");
+        IOException e = assertThrows(IOException.class, s::fetch);
+        assertFalse(e.getMessage().contains("hunter2"), e.getMessage());
+        assertFalse(e.getMessage().contains("alice"), e.getMessage());
+        assertTrue(e.getMessage().contains("127.0.0.1"), e.getMessage());
+    }
+
+    @Test
     void oversizedBodyIsAnError() {
         StringBuilder big = new StringBuilder("{\"pad\":\"");
         big.append("x".repeat(1_200_000));

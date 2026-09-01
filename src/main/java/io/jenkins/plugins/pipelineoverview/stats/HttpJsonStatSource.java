@@ -163,7 +163,9 @@ public class HttpJsonStatSource extends StatSource {
     }
 
     private static String safeTarget(URI uri) {
-        return uri.getScheme() + "://" + uri.getAuthority() + uri.getRawPath();
+        String host = uri.getHost();
+        if (host == null) return "the configured host";
+        return uri.getPort() > 0 ? host + ":" + uri.getPort() : host;
     }
 
     private static String readCapped(InputStream in) throws IOException {
@@ -197,10 +199,11 @@ public class HttpJsonStatSource extends StatSource {
         @POST
         public FormValidation doCheckUrl(@QueryParameter String value) {
             Jenkins.get().checkPermission(Jenkins.READ);
-            if (value == null || value.trim().isEmpty()) {
+            String trimmed = value != null ? value.trim() : "";
+            if (trimmed.isEmpty()) {
                 return FormValidation.error(Messages.HttpJsonStatSource_UrlRequired());
             }
-            if (!CustomStat.isSafeUrl(value)) {
+            if (!CustomStat.isSafeUrl(trimmed)) {
                 return FormValidation.error(Messages.CustomStat_UrlSchemeInvalid());
             }
             return FormValidation.ok();
