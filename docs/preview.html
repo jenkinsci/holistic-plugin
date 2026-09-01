@@ -133,7 +133,12 @@ const SAMPLE_DATA = {
     queueSize: 2,
     avgQueueWaitMs: 92000,
     agentsHealthy: 4,
-    agentsTotal: 4
+    agentsTotal: 4,
+    customStats: [
+      { label: 'Preview Envs', unit: '', capacity: 5, state: 'warn', value: 4,
+        link: 'https://argocd.example.com/applications' },
+      { label: 'Open Incidents', unit: '', state: 'ok', value: 0 }
+    ]
   },
   outbreaks: [
     { stageName: 'Deploy to Pre-Prod', count: 2,
