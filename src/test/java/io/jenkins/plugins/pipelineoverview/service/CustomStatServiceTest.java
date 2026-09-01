@@ -9,10 +9,7 @@ import io.jenkins.plugins.pipelineoverview.stats.StatValue;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.MethodOrderer;
-import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestMethodOrder;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -20,17 +17,23 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class CustomStatServiceTest {
 
     private long now = 1_700_000_000_000L;
@@ -40,6 +43,7 @@ class CustomStatServiceTest {
         private final String key;
         StatValue next;
         IOException failure;
+        int refreshSeconds = 60;
 
         FakeSource(String key, StatValue next) {
             this.key = key;
@@ -57,7 +61,7 @@ class CustomStatServiceTest {
         public String cacheKey() { return key; }
 
         @Override
-        public int getRefreshSeconds() { return 60; }
+        public int getRefreshSeconds() { return refreshSeconds; }
     }
 
     private CustomStat stat(String label, StatSource source) {
@@ -73,6 +77,7 @@ class CustomStatServiceTest {
 
     @BeforeEach
     void reset() {
+        CustomStatService.restartExecutorsForTesting();
         CustomStatService.clearCacheForTesting();
     }
 
@@ -235,6 +240,127 @@ class CustomStatServiceTest {
     }
 
     @Test
+    void aSourceWithoutARefreshIntervalIsFlooredByTheService() throws Exception {
+        FakeSource src = new FakeSource("k-floor", StatValue.numeric(3, now));
+        src.refreshSeconds = 0;
+        CustomStat s = stat("A", src);
+
+        service().snapshot(List.of(s));
+        CustomStatService.awaitQuiescenceForTesting();
+        now += 1;
+
+        JSONObject json = only(service().snapshot(List.of(s)));
+        assertEquals("ok", json.getString("state"), "a zero interval must not read as stale");
+        assertEquals(3, json.getInt("value"));
+
+        CustomStatService.awaitQuiescenceForTesting();
+        assertEquals(1, src.calls.get(), "a zero interval must not refetch on every snapshot");
+    }
+
+    @Test
+    void nonFiniteValueIsAnErrorRatherThanANonsenseNumber() throws Exception {
+        FakeSource src = new FakeSource("k-inf", StatValue.numeric(Double.POSITIVE_INFINITY, now));
+        CustomStat s = stat("A", src);
+
+        service().snapshot(List.of(s));
+        CustomStatService.awaitQuiescenceForTesting();
+
+        JSONObject json = only(service().snapshot(List.of(s)));
+        assertEquals("error", json.getString("state"));
+        assertFalse(json.has("value"), "an infinite value must not be rendered: " + json);
+    }
+
+    private static final class CapturingHandler extends Handler {
+        private final List<LogRecord> records = new ArrayList<>();
+
+        @Override
+        public synchronized void publish(LogRecord record) {
+            records.add(record);
+        }
+
+        @Override
+        public void flush() {}
+
+        @Override
+        public void close() {}
+
+        synchronized List<LogRecord> matching(String needle) {
+            return records.stream()
+                    .filter(r -> r.getMessage() != null && r.getMessage().contains(needle))
+                    .toList();
+        }
+    }
+
+    private static CapturingHandler captureServiceLog() {
+        CapturingHandler handler = new CapturingHandler();
+        handler.setLevel(Level.ALL);
+        Logger logger = Logger.getLogger(CustomStatService.class.getName());
+        logger.setLevel(Level.ALL);
+        logger.addHandler(handler);
+        return handler;
+    }
+
+    private static void stopCapturing(CapturingHandler handler) {
+        Logger.getLogger(CustomStatService.class.getName()).removeHandler(handler);
+    }
+
+    @Test
+    void onlyTheFirstOfARunOfFailuresLogsAtWarning() throws Exception {
+        CapturingHandler handler = captureServiceLog();
+        try {
+            FakeSource src = new FakeSource("k-noisy", null);
+            src.failure = new IOException("endpoint is down");
+            CustomStat s = stat("A", src);
+
+            for (int i = 0; i < 3; i++) {
+                service().snapshot(List.of(s));
+                CustomStatService.awaitQuiescenceForTesting();
+                now += 61_000;
+            }
+        } finally {
+            stopCapturing(handler);
+        }
+
+        List<LogRecord> failures = handler.matching("k-noisy");
+        assertEquals(3, failures.size(), "every failure should still reach the log");
+        assertEquals(Level.WARNING, failures.get(0).getLevel());
+        assertEquals(Level.FINE, failures.get(1).getLevel());
+        assertEquals(Level.FINE, failures.get(2).getLevel());
+        assertNotNull(failures.get(0).getThrown(), "the exception itself must be logged");
+    }
+
+    @Test
+    void aSuccessResetsTheFailureLogThrottle() throws Exception {
+        CapturingHandler handler = captureServiceLog();
+        try {
+            FakeSource src = new FakeSource("k-flapping", StatValue.numeric(1, now));
+            src.failure = new IOException("endpoint is down");
+            CustomStat s = stat("A", src);
+
+            service().snapshot(List.of(s));
+            CustomStatService.awaitQuiescenceForTesting();
+
+            src.failure = null;
+            now += 61_000;
+            service().snapshot(List.of(s));
+            CustomStatService.awaitQuiescenceForTesting();
+
+            src.failure = new IOException("endpoint is down again");
+            now += 61_000;
+            service().snapshot(List.of(s));
+            CustomStatService.awaitQuiescenceForTesting();
+        } finally {
+            stopCapturing(handler);
+        }
+
+        List<LogRecord> failures = handler.matching("k-flapping");
+        assertEquals(2, failures.size());
+        assertEquals(Level.WARNING, failures.get(0).getLevel());
+        assertEquals(Level.WARNING, failures.get(1).getLevel(),
+                "a success in between must reset the throttle");
+    }
+
+    @Test
     void emptyListGivesEmptyArray() {
         assertEquals(0, service().snapshot(List.of()).size());
     }
@@ -351,7 +477,6 @@ class CustomStatServiceTest {
     }
 
     @Test
-    @Order(Integer.MIN_VALUE)
     void terminatorShutsDownBothExecutors() throws Exception {
         Method shutdown = CustomStatService.class.getDeclaredMethod("shutdown");
         assertTrue(Modifier.isStatic(shutdown.getModifiers()), "the terminator must be static");

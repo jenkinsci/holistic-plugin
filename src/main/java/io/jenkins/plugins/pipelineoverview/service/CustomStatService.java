@@ -30,6 +30,8 @@ public class CustomStatService {
 
     private static final int STALE_MULTIPLIER = 3;
 
+    private static final int MIN_REFRESH_SECONDS = 15;
+
     private static final Cache<String, Entry> CACHE = Caffeine.newBuilder()
             .expireAfterWrite(Duration.ofHours(1))
             .maximumSize(200)
@@ -83,11 +85,13 @@ public class CustomStatService {
         final StatValue value;
         final long lastAttemptAt;
         final long lastSuccessAt;
+        final boolean failing;
 
-        Entry(StatValue value, long lastAttemptAt, long lastSuccessAt) {
+        Entry(StatValue value, long lastAttemptAt, long lastSuccessAt, boolean failing) {
             this.value = value;
             this.lastAttemptAt = lastAttemptAt;
             this.lastSuccessAt = lastSuccessAt;
+            this.failing = failing;
         }
     }
 
@@ -112,7 +116,7 @@ public class CustomStatService {
 
         String key = source.cacheKey();
         Entry entry = CACHE.getIfPresent(key);
-        long refreshMs = source.getRefreshSeconds() * 1000L;
+        long refreshMs = Math.max(MIN_REFRESH_SECONDS, source.getRefreshSeconds()) * 1000L;
 
         if (entry == null || now - entry.lastAttemptAt >= refreshMs) {
             scheduleRefresh(key, source, now);
@@ -125,6 +129,10 @@ public class CustomStatService {
         }
 
         StatValue value = entry.value;
+        if (value.isNumeric() && !Double.isFinite(value.getNumeric())) {
+            json.put("state", "error");
+            return json;
+        }
         json.put("value", value.isNumeric() ? stripTrailingZero(value) : value.getDisplay());
         boolean stale = now - entry.lastSuccessAt > STALE_MULTIPLIER * refreshMs;
         json.put("state", stale ? "stale" : stat.thresholdState(value));
@@ -159,14 +167,16 @@ public class CustomStatService {
             task = POOL.submit(() -> {
                 try {
                     StatValue value = source.fetch();
-                    CACHE.put(key, new Entry(value, attemptAt, attemptAt));
+                    CACHE.put(key, new Entry(value, attemptAt, attemptAt, false));
                 } catch (Exception e) {
                     Entry previous = CACHE.getIfPresent(key);
                     CACHE.put(key, new Entry(
                             previous != null ? previous.value : null,
                             attemptAt,
-                            previous != null ? previous.lastSuccessAt : 0L));
-                    LOGGER.log(Level.WARNING, "Custom stat refresh failed: " + e.getMessage());
+                            previous != null ? previous.lastSuccessAt : 0L,
+                            true));
+                    Level level = previous != null && previous.failing ? Level.FINE : Level.WARNING;
+                    LOGGER.log(level, e, () -> "Custom stat refresh failed for " + key);
                 } finally {
                     IN_FLIGHT.remove(key);
                 }
@@ -203,6 +213,11 @@ public class CustomStatService {
     static void awaitQuiescenceForTesting() throws InterruptedException {
         for (int i = 0; i < 200 && !IN_FLIGHT.isEmpty(); i++) {
             Thread.sleep(10);
+        }
+        if (!IN_FLIGHT.isEmpty()) {
+            throw new IllegalStateException(
+                    "Custom stat refreshes did not finish within 2 seconds: " + IN_FLIGHT.size()
+                            + " still in flight");
         }
     }
 
