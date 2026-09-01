@@ -1,0 +1,23 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form" xmlns:c="/lib/credentials">
+    <f:entry title="URL" field="url"
+             description="http or https endpoint returning JSON.">
+        <f:textbox />
+    </f:entry>
+    <f:entry title="Credentials" field="credentialsId"
+             description="Optional. Secret text is sent as a Bearer token, username and password as Basic auth.">
+        <c:select />
+    </f:entry>
+    <f:entry title="JSON pointer" field="pointer"
+             description="RFC 6901 pointer, for example /total_count or /items. Leave empty for the document root.">
+        <f:textbox />
+    </f:entry>
+    <f:entry title="Mode" field="mode"
+             description="Value reads a single scalar. Count returns the size of an array or object.">
+        <f:enum>${it}</f:enum>
+    </f:entry>
+    <f:entry title="Refresh interval (seconds)" field="refreshSeconds"
+             description="How often this endpoint is polled. Minimum 15 seconds.">
+        <f:number default="60" min="15" clazz="positive-number" />
+    </f:entry>
+</j:jelly>

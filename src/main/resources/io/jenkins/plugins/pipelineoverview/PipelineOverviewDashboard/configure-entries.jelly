@@ -30,4 +30,11 @@
         </f:entry>
     </f:section>
 
+    <f:section title="Custom Stats">
+        <f:entry description="Extra tiles on the command strip, fed from HTTP endpoints. Four or fewer keeps the strip readable from across a room.">
+            <f:repeatableProperty field="customStats" header="Stat"
+                                  add="Add Stat" minimum="0" />
+        </f:entry>
+    </f:section>
+
 </j:jelly>

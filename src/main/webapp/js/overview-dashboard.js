@@ -147,14 +147,31 @@
         unit: (s.agentsTotal != null ? '/' + s.agentsTotal : ''),
         label: 'Agents' },
     ];
+    const EMPTY = '\u2014';
+    const STATE_KIND = { crit: 'danger', warn: 'warn', stale: 'od-stat-stale' };
+    (s.customStats || []).forEach(cs => {
+      if (!cs || !cs.label) return;
+      const known = cs.state !== 'pending' && cs.state !== 'error' && cs.value != null;
+      vitals.push({
+        kind:  STATE_KIND[cs.state] || '',
+        value: known ? cs.value : EMPTY,
+        unit:  known ? ((cs.capacity != null ? '/' + cs.capacity : '') + (cs.unit || '')) : '',
+        label: cs.label,
+        link:  cs.link || ''
+      });
+    });
 
     const vitalNodes = vitals.map(v => {
-      return '<div class="vital ' + v.kind + '">' +
+      const inner =
         '<div class="vital-value">' + escapeHtml(String(v.value)) +
           (v.unit ? '<span class="unit">' + escapeHtml(v.unit) + '</span>' : '') +
         '</div>' +
-        '<div class="vital-label">' + escapeHtml(v.label) + '</div>' +
-        '</div>';
+        '<div class="vital-label">' + escapeHtml(v.label) + '</div>';
+      if (v.link) {
+        return '<a class="vital ' + v.kind + '" href="' + escapeHtml(v.link) +
+               '" rel="noopener noreferrer">' + inner + '</a>';
+      }
+      return '<div class="vital ' + v.kind + '">' + inner + '</div>';
     }).join('');
 
     const backHtml = fullscreen
@@ -602,13 +619,13 @@
     });
 
     const branchCount = c => Math.max(1, c.branches.length);
-    const colSpan = c => Math.max(1, ...c.branches.map(b => b.nodes.length));
+    const colSpan = c => Math.max(1, Math.max.apply(null, c.branches.map(b => b.nodes.length)));
 
     let x = PADDING_X;
     cols.forEach(c => { c.x = x; x += colSpan(c) * SUB_GAP + COL_GAP; });
     const totalWidth = x - COL_GAP + PADDING_X;
 
-    const maxBranches = Math.max(1, ...cols.map(branchCount));
+    const maxBranches = Math.max(1, Math.max.apply(null, cols.map(branchCount)));
     const innerH = maxBranches * ROW_H;
     const totalHeight = TOP_PAD + innerH + BOTTOM_PAD;
     const centerY = TOP_PAD + innerH / 2;

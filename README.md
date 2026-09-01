@@ -79,6 +79,90 @@ other knobs:
 * `dashboardTitle`. heading text in the command strip.
 * `autoExcludeFolders`. list of folder prefixes auto-discover should skip, e.g. `["sonar", "releases"]` if you want to ignore sonar scan jobs.
 
+### custom stats
+
+extra tiles on the command strip, pulled from any HTTP endpoint that returns JSON. no code, no
+fork, just view config or JCasC.
+
+```yaml
+jenkins:
+  views:
+    - holistic:
+        name: "Pipeline Overview"
+        autoDiscover: true
+        customStats:
+          - label: "Preview Envs"
+            capacity: 5
+            warnAt: 4
+            critAt: 5
+            linkUrl: "https://argocd.example.com/applications"
+            source:
+              httpJson:
+                url: "https://argocd.example.com/api/v1/applications?selector=preview=true"
+                pointer: "/items"
+                mode: COUNT
+                credentialsId: "argocd-readonly"
+                refreshSeconds: 60
+```
+
+stat fields:
+
+* `label`. required. caption under the number.
+* `unit`. optional suffix, e.g. `%` or `envs`.
+* `capacity`. optional denominator. `capacity: 5` renders `4/5`.
+* `warnAt` / `critAt`. optional thresholds. direction is inferred from their order: `critAt` above
+  `warnAt` means higher is worse, `critAt` below it means lower is worse. equal means higher is
+  worse and the tile goes straight to red.
+* `linkUrl`. optional http or https URL. makes the tile clickable.
+
+`httpJson` source fields:
+
+* `url`. required. http or https only.
+* `credentialsId`. optional jenkins credential. secret text is sent as `Authorization: Bearer`,
+  username and password as Basic auth.
+* `pointer`. RFC 6901 JSON pointer, e.g. `/total_count` or `/items`. empty means the document root.
+* `mode`. `VALUE` reads a scalar, `COUNT` returns the size of an array or object.
+* `refreshSeconds`. default 60, minimum 15.
+
+a non-numeric value renders as text with thresholds ignored, so a stat can show a word rather than
+a number.
+
+the response body must be a JSON object or array. an endpoint whose entire body is a bare value
+like `42` is not supported.
+
+every fetch has three hard limits. none of them is configurable:
+
+* **1 MB response body cap.** a larger body fails the stat instead of being truncated, so a tile
+  never shows a number read from half a document.
+* **10 second read deadline** (plus a 5 second connect timeout). an endpoint that stalls mid-body
+  fails the stat rather than holding a background worker until it gives up.
+* **redirects are not followed.** a 301 or 302 is an error. point `url` at the final location,
+  including the right scheme and any trailing slash the server expects.
+
+the 1 MB cap is the one you are most likely to hit. argocd's `/api/v1/applications` returns the
+full spec, status and sync history of every application, which on a busy instance approaches or
+exceeds 1 MB. argocd accepts a `fields=` query parameter that trims the payload to what the stat
+actually reads, which fixes it:
+
+```
+https://argocd.example.com/api/v1/applications?selector=preview=true&fields=items.metadata.name
+```
+
+four stats or fewer keeps the strip readable across a room. the tiles share its width.
+
+the dashboard never blocks on these calls. values are fetched in the background and cached; a stat
+that has not been fetched yet shows a placeholder and fills in on the next refresh. if an endpoint
+goes away, the last known value stays put and dims with a stale marker after three refresh
+intervals rather than silently lying.
+
+endpoints behind an internal CA need that CA in the jenkins controller's JVM truststore. there is
+no TLS verification bypass option and there will not be one.
+
+adding a stat requires permission to configure the view. saving a view whose stats reference a
+`credentialsId` additionally requires overall jenkins administer permission, because the stored
+secret is sent to whatever url the stat names. a non-administrator with view configure permission
+can still add and edit stats that use no credential.
+
 ## opening the dashboard
 
 once a view is configured (above), there are two ways to open it:

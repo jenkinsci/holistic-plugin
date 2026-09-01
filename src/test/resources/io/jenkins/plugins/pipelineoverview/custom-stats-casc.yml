@@ -1,0 +1,18 @@
+jenkins:
+  views:
+    - holistic:
+        name: "Pipeline Overview"
+        autoDiscover: true
+        customStats:
+          - label: "Preview Envs"
+            capacity: 5
+            warnAt: 4
+            critAt: 5
+            linkUrl: "https://argocd.example.com/applications"
+            source:
+              httpJson:
+                url: "https://argocd.example.com/api/v1/applications?selector=preview=true"
+                pointer: "/items"
+                mode: COUNT
+                credentialsId: "argocd-readonly"
+                refreshSeconds: 60
