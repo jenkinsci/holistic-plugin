@@ -602,13 +602,13 @@
     });
 
     const branchCount = c => Math.max(1, c.branches.length);
-    const colSpan = c => Math.max(1, ...c.branches.map(b => b.nodes.length));
+    const colSpan = c => Math.max(1, Math.max.apply(null, c.branches.map(b => b.nodes.length)));
 
     let x = PADDING_X;
     cols.forEach(c => { c.x = x; x += colSpan(c) * SUB_GAP + COL_GAP; });
     const totalWidth = x - COL_GAP + PADDING_X;
 
-    const maxBranches = Math.max(1, ...cols.map(branchCount));
+    const maxBranches = Math.max(1, Math.max.apply(null, cols.map(branchCount)));
     const innerH = maxBranches * ROW_H;
     const totalHeight = TOP_PAD + innerH + BOTTOM_PAD;
     const centerY = TOP_PAD + innerH / 2;
