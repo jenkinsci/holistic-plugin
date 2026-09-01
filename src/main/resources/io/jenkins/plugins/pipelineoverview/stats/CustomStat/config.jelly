@@ -1,0 +1,33 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+    <f:entry title="Label" field="label"
+             description="Caption shown under the value on the command strip.">
+        <f:textbox />
+    </f:entry>
+    <f:entry title="Unit" field="unit"
+             description="Optional suffix shown after the value, for example % or envs.">
+        <f:textbox />
+    </f:entry>
+    <f:entry title="Capacity" field="capacity"
+             description="Optional denominator. A capacity of 5 renders the value as 4/5.">
+        <f:number clazz="positive-number" />
+    </f:entry>
+    <f:entry title="Warning threshold" field="warnAt"
+             description="Optional. Amber at or beyond this value.">
+        <f:number />
+    </f:entry>
+    <f:entry title="Critical threshold" field="critAt"
+             description="Optional. Red at or beyond this value. Set it above the warning threshold when higher is worse, below it when lower is worse.">
+        <f:number />
+    </f:entry>
+    <f:entry title="Link" field="linkUrl"
+             description="Optional http or https URL. Makes the tile clickable.">
+        <f:textbox />
+    </f:entry>
+    <f:dropdownDescriptorSelector field="source" title="Source" />
+    <f:entry>
+        <div align="right">
+            <f:repeatableDeleteButton value="Remove Stat" />
+        </div>
+    </f:entry>
+</j:jelly>

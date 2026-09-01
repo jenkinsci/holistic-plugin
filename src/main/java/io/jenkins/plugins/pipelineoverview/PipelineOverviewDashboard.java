@@ -10,7 +10,9 @@ import hudson.model.View;
 import hudson.model.ViewDescriptor;
 import hudson.model.ViewGroup;
 import hudson.util.FormValidation;
+import io.jenkins.plugins.pipelineoverview.service.CustomStatService;
 import io.jenkins.plugins.pipelineoverview.service.OverviewDataService;
+import io.jenkins.plugins.pipelineoverview.stats.CustomStat;
 import jenkins.model.Jenkins;
 import net.sf.json.JSONObject;
 import org.jenkinsci.Symbol;
@@ -45,6 +47,7 @@ public class PipelineOverviewDashboard extends View {
     private String dashboardTitle;
     private boolean autoDiscover;
     private List<String> autoExcludeFolders;
+    private List<CustomStat> customStats;
     private transient List<DashboardGroup> autoCache;
     private transient long autoCacheAt;
 
@@ -67,6 +70,7 @@ public class PipelineOverviewDashboard extends View {
         this.dashboardTitle = "";
         this.autoDiscover = false;
         this.autoExcludeFolders = new ArrayList<>();
+        this.customStats = new ArrayList<>();
     }
 
 
@@ -82,6 +86,9 @@ public class PipelineOverviewDashboard extends View {
     public boolean isAutoDiscover()        { return autoDiscover; }
     public List<String> getAutoExcludeFolders() {
         return autoExcludeFolders != null ? autoExcludeFolders : new ArrayList<>();
+    }
+    public List<CustomStat> getCustomStats() {
+        return customStats != null ? customStats : new ArrayList<>();
     }
     public String getHeaderMessage() {
         return headerMessage != null ? headerMessage : "";
@@ -127,6 +134,11 @@ public class PipelineOverviewDashboard extends View {
     public void setAutoExcludeFolders(List<String> v) {
         this.autoExcludeFolders = v != null ? new ArrayList<>(v) : new ArrayList<>();
         invalidateAutoCache();
+    }
+
+    @DataBoundSetter
+    public void setCustomStats(List<CustomStat> customStats) {
+        this.customStats = customStats != null ? new ArrayList<>(customStats) : new ArrayList<>();
     }
 
     private synchronized void invalidateAutoCache() {
@@ -244,6 +256,13 @@ public class PipelineOverviewDashboard extends View {
         } else {
             this.groups = new ArrayList<>();
         }
+
+        Object statsData = json.opt("customStats");
+        if (statsData != null) {
+            this.customStats = req.bindJSONToList(CustomStat.class, statsData);
+        } else {
+            this.customStats = new ArrayList<>();
+        }
     }
 
     boolean renameJob(String oldFullName, String newFullName) {
@@ -283,6 +302,15 @@ public class PipelineOverviewDashboard extends View {
 
             result.put("viewName", getDashboardTitle());
             result.put("headerMessage", getHeaderMessage());
+
+            try {
+                JSONObject summary = result.optJSONObject("summary");
+                if (summary != null) {
+                    summary.put("customStats", new CustomStatService().snapshot(getCustomStats()));
+                }
+            } catch (RuntimeException e) {
+                LOGGER.log(Level.WARNING, "Custom stats unavailable for this refresh", e);
+            }
 
             rsp.getWriter().write(result.toString());
         } catch (Throwable t) {
