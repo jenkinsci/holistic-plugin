@@ -20,6 +20,7 @@ public class CustomStat extends AbstractDescribableImpl<CustomStat> implements S
     private static final long serialVersionUID = 1L;
 
     private String label;
+    private StatSource source;
     private String unit;
     private Integer capacity;
     private Integer warnAt;
@@ -32,11 +33,15 @@ public class CustomStat extends AbstractDescribableImpl<CustomStat> implements S
     }
 
     public String getLabel()     { return label != null ? label : ""; }
+    public StatSource getSource() { return source; }
     public String getUnit()      { return unit != null ? unit : ""; }
     public Integer getCapacity() { return capacity; }
     public Integer getWarnAt()   { return warnAt; }
     public Integer getCritAt()   { return critAt; }
     public String getLinkUrl()   { return linkUrl != null ? linkUrl : ""; }
+
+    @DataBoundSetter
+    public void setSource(StatSource source) { this.source = source; }
 
     @DataBoundSetter
     public void setUnit(String unit) { this.unit = unit != null ? unit.trim() : ""; }
