@@ -84,6 +84,8 @@ other knobs:
 extra tiles on the command strip, pulled from any HTTP endpoint that returns JSON. no code, no
 fork, just view config or JCasC.
 
+![custom stats on the command strip: preview envs 4/5 in amber, open incidents 0](docs/custom-stats.png)
+
 ```yaml
 jenkins:
   views:
