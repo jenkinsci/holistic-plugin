@@ -189,6 +189,7 @@ public class HttpJsonStatSource extends StatSource {
 
     @Extension
     @Symbol("httpJson")
+    // Typed to StatSource so the form dropdown discovers every installed source type.
     public static class DescriptorImpl extends Descriptor<StatSource> {
 
         @Override

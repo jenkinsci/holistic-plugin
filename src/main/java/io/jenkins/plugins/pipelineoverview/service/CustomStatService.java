@@ -32,6 +32,7 @@ public class CustomStatService {
 
     private static final int MIN_REFRESH_SECONDS = 15;
 
+    // Expires well after the refresh interval so the stale state keeps its last good value.
     private static final Cache<String, Entry> CACHE = Caffeine.newBuilder()
             .expireAfterWrite(Duration.ofHours(1))
             .maximumSize(200)
@@ -43,6 +44,7 @@ public class CustomStatService {
 
     private static final long FETCH_TIMEOUT_MS = 30_000;
 
+    // A silent socket blocks inside read, so only an interrupt frees the pool thread.
     private static volatile ScheduledExecutorService WATCHDOG = newWatchdog();
 
     private static ThreadPoolExecutor newRefreshPool() {
@@ -190,6 +192,7 @@ public class CustomStatService {
             throw t;
         }
         try {
+            // A cancelled task that never ran has no finally, so release its key here.
             WATCHDOG.schedule(() -> {
                 if (task.cancel(true)) IN_FLIGHT.remove(key);
             }, fetchTimeoutMs, TimeUnit.MILLISECONDS);

@@ -249,6 +249,7 @@ public class PipelineOverviewDashboard extends View {
         List<CustomStat> submittedStats = statsData != null
                 ? req.bindJSONToList(CustomStat.class, statsData)
                 : new ArrayList<>();
+        // View configure alone would let a user retarget a credential to a host they control.
         if (referencesCredentials(submittedStats)
                 && !Jenkins.get().hasPermission(Jenkins.ADMINISTER)) {
             throw new Descriptor.FormException(
