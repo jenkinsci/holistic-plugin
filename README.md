@@ -130,6 +130,24 @@ a number.
 the response body must be a JSON object or array. an endpoint whose entire body is a bare value
 like `42` is not supported.
 
+every fetch has three hard limits. none of them is configurable:
+
+* **1 MB response body cap.** a larger body fails the stat instead of being truncated, so a tile
+  never shows a number read from half a document.
+* **10 second read deadline** (plus a 5 second connect timeout). an endpoint that stalls mid-body
+  fails the stat rather than holding a background worker until it gives up.
+* **redirects are not followed.** a 301 or 302 is an error. point `url` at the final location,
+  including the right scheme and any trailing slash the server expects.
+
+the 1 MB cap is the one you are most likely to hit. argocd's `/api/v1/applications` returns the
+full spec, status and sync history of every application, which on a busy instance approaches or
+exceeds 1 MB. argocd accepts a `fields=` query parameter that trims the payload to what the stat
+actually reads, which fixes it:
+
+```
+https://argocd.example.com/api/v1/applications?selector=preview=true&fields=items.metadata.name
+```
+
 four stats or fewer keeps the strip readable across a room. the tiles share its width.
 
 the dashboard never blocks on these calls. values are fetched in the background and cached; a stat
