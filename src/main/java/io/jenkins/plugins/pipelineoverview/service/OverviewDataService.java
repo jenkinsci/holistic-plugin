@@ -120,8 +120,8 @@ public class OverviewDataService {
 
         List<JSONObject> regressions = new ArrayList<>();
         for (PipelineSnapshot p : broken) {
-            if (p.brokeAtMs == 0 || p.lastGreenTimeMs == 0) continue;
-            long greenDuration = p.brokeAtMs - p.lastGreenTimeMs;
+            if (p.brokeAtMs == 0 || p.greenSinceMs == 0) continue;
+            long greenDuration = p.brokeAtMs - p.greenSinceMs;
             long brokeAge = now - p.brokeAtMs;
             if (greenDuration >= REGRESSION_MIN_GREEN_MS && brokeAge <= REGRESSION_WINDOW_MS) {
                 JSONObject r = new JSONObject();
@@ -317,6 +317,7 @@ public class OverviewDataService {
             snap.brokeAtMs = brokeAt;
             snap.lastGreenBuildNumber = lastGreenBuild;
             snap.lastGreenTimeMs = lastGreenTime;
+            snap.greenSinceMs = greenStreakStartMs(records);
             snap.failedStage = findFailedStage(snap.stagesTopology);
             if (snap.failedStage != null) {
                 snap.failedStageName = snap.failedStage.optString("name", null);
@@ -722,6 +723,18 @@ public class OverviewDataService {
         return records;
     }
 
+    // Start of the SUCCESS run that ended at the last green build. On a busy pipeline the
+    // last green build is minutes before the break, so it can't measure how long it was green.
+    static long greenStreakStartMs(List<BuildRecord> records) {
+        long start = 0;
+        for (BuildRecord r : records) {
+            if (r.building()) continue;
+            if ("SUCCESS".equals(r.result())) start = r.startTimeMs();
+            else if (start != 0 && ("FAILURE".equals(r.result()) || "UNSTABLE".equals(r.result()))) break;
+        }
+        return start;
+    }
+
     private JSONArray extractSuccessDurations(List<BuildRecord> records) {
         List<Integer> seconds = new ArrayList<>();
         for (BuildRecord r : records) {
@@ -892,11 +905,12 @@ public class OverviewDataService {
         long brokeAtMs;
         int lastGreenBuildNumber;
         long lastGreenTimeMs;
+        long greenSinceMs;
         JSONObject failedStage;
         String failedStageName;
     }
 
-    private record BuildRecord(int number, String result, long durationMs, long startTimeMs, boolean building) {}
+    record BuildRecord(int number, String result, long durationMs, long startTimeMs, boolean building) {}
 
     /**
      * Collects the stages of one parallel branch. The branch's displayable sequence is
