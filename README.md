@@ -2,7 +2,11 @@
 
 Jenkins dashboard for a TV in the office. shows what's broken, where, and for how long. designed to be read from across the room.
 
-![screenshot](docs/screenshot.png)
+**[live demo](https://jenkinsci.github.io/holistic-plugin/)** (mock data, runs in the browser, no jenkins needed)
+
+![Holistic dashboard: stage outbreak, just regressed, currently broken, pipeline health, queue and locks](docs/demo.gif)
+
+questions, ideas, "doesn't fit my setup": [discussions](https://github.com/jenkinsci/holistic-plugin/discussions). bugs: [issues](https://github.com/jenkinsci/holistic-plugin/issues).
 
 ## what it does
 
@@ -194,7 +198,7 @@ the embedded view follows the active Jenkins theme. the dark full-screen look is
 
 ## live preview
 
-open `docs/preview.html` in a browser. it mocks the data so the dashboard renders without needing a jenkins. useful if you just want to see what the layout looks like before installing.
+hosted at https://jenkinsci.github.io/holistic-plugin/, or open `docs/preview.html` locally. it mocks the data so the dashboard renders without needing a jenkins. useful if you just want to see what the layout looks like before installing.
 
 ## building
 
@@ -202,7 +206,7 @@ open `docs/preview.html` in a browser. it mocks the data so the dashboard render
 mvn package
 ```
 
-needs JDK 17+, maven 3.6+. targets jenkins 2.541+. depends on `workflow-api`, `workflow-job`, `pipeline-rest-api`, `ionicons-api`, `caffeine-api`. `lockable-resources` is an optional dependency: the locks panel only loads when that plugin is installed, otherwise it's skipped.
+needs JDK 17+, maven 3.6+. targets jenkins 2.479.3+. depends on `workflow-api`, `workflow-job`, `pipeline-rest-api`, `ionicons-api`, `caffeine-api`. `lockable-resources` is an optional dependency: the locks panel only loads when that plugin is installed, otherwise it's skipped.
 
 ## stuff worth knowing
 
